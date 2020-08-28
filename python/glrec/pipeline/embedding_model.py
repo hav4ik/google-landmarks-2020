@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from glrec import utils
+from glrec.pipeline import utils
 import numpy as np
 
 

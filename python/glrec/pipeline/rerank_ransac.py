@@ -3,7 +3,7 @@ import pydegensac
 from scipy import spatial
 import copy
 
-from glrec import utils
+from glrec.pipeline import utils
 from glrec.pipeline.embedding_model import AbstractEmbeddingModel
 from glrec.pipeline.rerank_base import AbstractRerankStrategy
 

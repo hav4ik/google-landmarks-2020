@@ -5,8 +5,8 @@ import pathlib
 import numpy as np
 from scipy import spatial
 
-from glrec import const
-from glrec import utils
+from glrec.pipeline import const
+from glrec.pipeline import utils
 from glrec.pipeline.embedding_model import AbstractEmbeddingModel
 from glrec.pipeline.rerank_base import AbstractRerankStrategy
 
