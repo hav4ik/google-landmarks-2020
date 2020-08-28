@@ -1,4 +1,4 @@
-class TrainingLoopConstants:
+class _TrainingLoopConstants:
     """Static object that holds information relevant for training loop"""
     def __init__(self):
         self.set_mode('gld_v2_clean')
@@ -24,3 +24,7 @@ class TrainingLoopConstants:
             'gld_v2': 203094,
             'gld_v2_clean': 81313
         }[self._mode]
+
+
+# Static instance to store training constants
+constants = _TrainingLoopConstants()

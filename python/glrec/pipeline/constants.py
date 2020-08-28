@@ -1,4 +1,4 @@
-class CompetitionConstants:
+class _CompetitionConstants:
     """
     Static object that holds information about competition input
     files (such as datasets files, csv files, etc.)
@@ -65,4 +65,4 @@ class CompetitionConstants:
 
 
 # Static instance to store the competition's constants
-constants = CompetitionConstants()
+constants = _CompetitionConstants()
