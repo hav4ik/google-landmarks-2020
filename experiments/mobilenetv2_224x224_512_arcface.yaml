@@ -1,0 +1,27 @@
+dataset_config:
+  # Configure the dataset pipeline (paths, gcs creds,
+  # shuffling and augmentation configurations)
+
+  image_size: [512, 512]
+  imagenet_crop: false
+
+  train_tfrecords:
+    tfrecord_dir: gs://gld-v2-clean/gldv2_dataset/tfrecord/
+    basename: train
+    shards: 128
+
+  validation_tfrecords:
+    tfrecord_dir: gs://gld-v2-clean/gldv2_dataset/tfrecord/
+    basename: validation
+    shards: 128
+
+  train_shuffle:
+    buffer_size: 128
+    seed: 17061998
+
+  train_augmentations:
+    - class: TFImageTransform
+      kwargs:
+        horizontal_flip: true
+        vertical_flip: false
+        brightness_adjustments: false
