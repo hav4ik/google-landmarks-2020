@@ -1,0 +1,9 @@
+language: python
+python:
+  - "3.6"
+install:
+  - cd python/
+  - pip install pytest
+  - pip install .
+script:
+  - pytest
