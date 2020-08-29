@@ -26,21 +26,29 @@ def arcmarginproduct_model():
     return model
 
 
-def test_arcface(arcface_model):
+@pytest.mark.parametrize('training', [True, False])
+def test_arcface(arcface_model, training):
     batch_size = 8
     embeddings = np.random.rand(batch_size, 512)
     labels = np.random.randint(0, 10, size=(batch_size, ))
     embeddings = tf.convert_to_tensor(embeddings)
     labels = tf.convert_to_tensor(labels)
-    outputs = arcface_model([embeddings, labels]).numpy()
+    outputs = arcface_model(
+            [embeddings, labels],
+            training=training,
+            ).numpy()
     assert outputs.shape == (batch_size, 10)
 
 
-def test_arcmarginproduct(arcmarginproduct_model):
+@pytest.mark.parametrize('training', [True, False])
+def test_arcmarginproduct(arcmarginproduct_model, training):
     batch_size = 8
     embeddings = np.random.rand(batch_size, 512)
     labels = np.random.randint(0, 10, size=(batch_size, ))
     embeddings = tf.convert_to_tensor(embeddings)
     labels = tf.convert_to_tensor(labels)
-    outputs = arcmarginproduct_model([embeddings, labels]).numpy()
+    outputs = arcmarginproduct_model(
+            [embeddings, labels],
+            training=training,
+            ).numpy()
     assert outputs.shape == (batch_size, 10)
