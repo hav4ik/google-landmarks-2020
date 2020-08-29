@@ -2,6 +2,7 @@ import math
 import tensorflow as tf
 import tensorflow.keras.backend as K
 from tensorflow.keras.layers import Layer
+from tensorflow.python.keras.utils import tf_utils
 
 
 class ArcMarginProduct(Layer):
@@ -41,30 +42,36 @@ class ArcMarginProduct(Layer):
                                  trainable=True,
                                  regularizer=None)
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         X, y = inputs
         y = tf.cast(y, dtype=tf.int32)
         cosine = tf.matmul(
             tf.math.l2_normalize(X, axis=1),
             tf.math.l2_normalize(self.W, axis=0)
         )
-        sine = tf.math.sqrt(1.0 - tf.math.pow(cosine, 2))
-        phi = cosine * self.cos_m - sine * self.sin_m
-        if self.easy_margin:
-            phi = tf.where(cosine > 0, phi, cosine)
-        else:
-            phi = tf.where(cosine > self.th, phi, cosine - self.mm)
-        one_hot = tf.cast(
-            tf.one_hot(y, depth=self.n_classes),
-            dtype=cosine.dtype
-        )
-        if self.ls_eps > 0:
-            one_hot = (1 - self.ls_eps) * one_hot + \
-                    self.ls_eps / self.n_classes
 
-        output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
-        output *= self.s
-        return output
+        training = _resolve_training(self, training)
+        if not training:
+            # We don't have labels if we're not in training mode
+            return cosine
+        else:
+            sine = tf.math.sqrt(1.0 - tf.math.pow(cosine, 2))
+            phi = cosine * self.cos_m - sine * self.sin_m
+            if self.easy_margin:
+                phi = tf.where(cosine > 0, phi, cosine)
+            else:
+                phi = tf.where(cosine > self.th, phi, cosine - self.mm)
+            one_hot = tf.cast(
+                tf.one_hot(y, depth=self.n_classes),
+                dtype=cosine.dtype
+            )
+            if self.ls_eps > 0:
+                one_hot = (1 - self.ls_eps) * one_hot + \
+                        self.ls_eps / self.n_classes
+
+            output = (one_hot * phi) + ((1.0 - one_hot) * cosine)
+            output *= self.s
+            return output
 
 
 class ArcFace(Layer):
@@ -90,7 +97,7 @@ class ArcFace(Layer):
                                   trainable=True,
                                   regularizer=self._regularizer)
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         embedding, label = inputs
 
         # Normalize features and weights
@@ -100,13 +107,45 @@ class ArcFace(Layer):
         # Dot product
         logits = tf.matmul(x, w)
 
-        # Add margin
-        theta = tf.math.acos(
-                K.clip(logits, -1.0 + K.epsilon(), 1.0 - K.epsilon()))
-        target_logits = tf.math.cos(theta + self._m)
-        one_hot = tf.one_hot(label, depth=self._n_classes)
-        output = logits * (1. - one_hot) + target_logits * one_hot
+        training = _resolve_training(self, training)
+        if not training:
+            # We don't have labels if we're not in training mode
+            return logits
+        else:
+            # Add margin
+            theta = tf.math.acos(
+                    K.clip(logits, -1.0 + K.epsilon(), 1.0 - K.epsilon()))
+            target_logits = tf.math.cos(theta + self._m)
+            one_hot = tf.one_hot(label, depth=self._n_classes)
+            output = logits * (1. - one_hot) + target_logits * one_hot
 
-        # Feature re-scale
-        output *= self._s
-        return output
+            # Feature re-scale
+            output *= self._s
+            return output
+
+
+class AdaCos(Layer):
+    def __init__(self, num_classes, m=0.5, regularizer=None, **kwargs):
+        super().__init__(**kwargs)
+        self._n_classes = num_classes
+        self._s = math.sqrt(2) * math.log(num_classes - 1)
+        self._m = m
+        self._regularizer = regularizer
+
+    def build(self, input_shape):
+        embedding_shape, label = input_shape
+
+    def call(self, inputs):
+        pass
+
+
+def _resolve_training(layer, training):
+    if training is None:
+        training = K.learning_phase()
+    if isinstance(training, int):
+        training = bool(training)
+    if not layer.trainable:
+        # When the layer is not trainable, it overrides the value passed from
+        # model.
+        training = False
+    return tf_utils.constant_value(training)
