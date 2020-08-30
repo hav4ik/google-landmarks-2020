@@ -1,0 +1,95 @@
+# Information about the experiment
+experiment:
+  name: '[mnetv2]_[224x224]_[512]_[GAP+ArcFace(30,0.5)]'
+  storage: /tmp/delg/
+  method: DELG
+  description: >
+    This is a toy experiment using MobileNetV2 as backbone.
+    The main purpose of this experiment is just for local
+    testing (and maybe some toy training).
+
+
+
+# Google Landmark Data Version
+gld_version: gld_v2_clean
+
+
+
+# Configure the dataset feeding pipeline
+dataset_config:
+  image_size: [224, 224, 3]
+  imagenet_crop: false
+
+  train_tfrecords:
+    tfrecord_dir: gs://gld-v2-clean/gldv2_dataset/tfrecord/
+    basename: train
+    shards: 128
+
+  validation_tfrecords:
+    tfrecord_dir: gs://gld-v2-clean/gldv2_dataset/tfrecord/
+    basename: validation
+    shards: 128
+
+  train_shuffle:
+    buffer_size: 2048
+    seed: 17061998
+
+  train_augmentations:
+    # Using only horizontal flips, as in Keetar's solution
+    - class: TFImageTransform
+      kwargs:
+        horizontal_flip: true
+        vertical_flip: false
+        brightness_adjustments: false
+
+
+
+# Model configurations
+model_config:
+
+  # Backbone CNN configuration
+  backbone_config:
+    architecture: MobileNetV2
+    weights: imagenet
+    trainable: true
+
+  # Global branch: [backbone]->[pooling]->[dense]->[head]
+  global_branch_config:
+    # Currently, the following pooling methods are supported:
+    #   - GAP()
+    #   - GeM(p=3, train_p=True)
+    pooling_config:
+      method: GAP
+      kwargs: {}
+
+    # Embedding after pooling (output units of a Dense layer
+    # without activation function because the backbone already
+    # have it, and without bias.
+    embedding_dim: 512
+
+    # Currently, the following heads are supported:
+    #   - ArcFace(s=30, m=0.5)
+    #   - ArcMarginProduct(s=30, m=0.5, easy_margin=False)
+    #   - AdaCos(m=0.5, is_dynamic=True)
+    #   - CosFace(s=30, m=0.35)
+    head_config:
+      layer: ArcFace
+      kwargs:
+        s: 30.0
+        m: 0.5
+
+  # Local features extractor
+  local_branch_config: null
+
+
+
+# Configuration of the training process
+training_config:
+  batch_size: 8
+  epochs: 30
+  optimizer:
+    algorithm: SGD
+    kwargs:
+      learning_rate: 0.001
+      momentum: 0.9
+      decay: 0.00001

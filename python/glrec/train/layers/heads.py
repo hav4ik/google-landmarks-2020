@@ -26,8 +26,8 @@ class ArcMarginProduct(Layer):
 
         super().__init__(**kwargs)
         self._n_classes = num_classes
-        self._s = s
-        self._m = m
+        self._s = float(s)
+        self._m = float(m)
         self._ls_eps = ls_eps
         self._easy_margin = easy_margin
         self._cos_m = tf.math.cos(m)
@@ -94,8 +94,8 @@ class ArcFace(Layer):
 
         super().__init__(**kwargs)
         self._n_classes = num_classes
-        self._s = s
-        self._m = m
+        self._s = float(s)
+        self._m = float(m)
         self._regularizer = regulazer
 
     def build(self, input_shape):
@@ -147,14 +147,14 @@ class AdaCos(Layer):
     def __init__(self,
                  num_classes,
                  m=0.5,
-                 is_dynamic=False,
+                 is_dynamic=True,
                  regularizer=None,
                  **kwargs):
 
         super().__init__(**kwargs)
         self._n_classes = num_classes
         self._init_s = math.sqrt(2) * math.log(num_classes - 1)
-        self._m = m
+        self._m = float(m)
         self._is_dynamic = is_dynamic
         self._regularizer = regularizer
 
@@ -228,7 +228,7 @@ class CosFace(Layer):
         https://github.com/4uiiurz1/keras-arcface/blob/master/metrics.py
     """
     def __init__(self,
-                 num_classes=10,
+                 num_classes,
                  s=30.0,
                  m=0.35,
                  regularizer=None,
@@ -236,8 +236,8 @@ class CosFace(Layer):
 
         super().__init__(**kwargs)
         self._n_classes = num_classes
-        self._s = s
-        self._m = m
+        self._s = float(s)
+        self._m = float(m)
         self._regularizer = regularizer
 
     def build(self, input_shape):

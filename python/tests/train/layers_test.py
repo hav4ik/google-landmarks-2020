@@ -1,11 +1,13 @@
 import pytest
-from glrec.train.layers import ArcFace
-from glrec.train.layers import ArcMarginProduct
-from glrec.train.layers import AdaCos
-from glrec.train.layers import CosFace
-
 import tensorflow as tf
 import numpy as np
+
+from glrec.train.layers.heads import ArcFace
+from glrec.train.layers.heads import ArcMarginProduct
+from glrec.train.layers.heads import AdaCos
+from glrec.train.layers.heads import CosFace
+
+from glrec.train.layers.pooling import GeneralizedMeanPooling2D
 
 
 @pytest.mark.parametrize('training', [True, False])
@@ -88,3 +90,10 @@ def test_cosface(training):
             training=training,
             ).numpy()
     assert outputs.shape == (batch_size, 10)
+
+
+def test_generalized_mean_pooling():
+    last_layer_emb = tf.convert_to_tensor(np.random.rand(8, 6, 10, 16))
+    gem = GeneralizedMeanPooling2D()
+    output = gem(last_layer_emb).numpy()
+    assert output.shape == (8, 16)
