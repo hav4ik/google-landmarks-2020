@@ -1,6 +1,7 @@
 from argparse import ArgumentParser
 import yaml
 import tensorflow as tf
+from tensorflow.keras import optimizers as keras_optimizers
 
 from glrec.train import dataflow
 from glrec.train import augmentation
@@ -12,10 +13,8 @@ from delg_model import DelgModel
 
 argument_parser = ArgumentParser(
         description='Training script for Google Landmarks Challenge 2020')
-argument_parser.add_argument(
-        '--yaml_path', type=str,
-        default='../experiments/mobilenetv2_224x224_512_arcface.yaml',
-        help='Path to the YAML experiment config file')
+argument_parser.add_argument('yaml_path', type=str,
+                             help='Path to the YAML experiment config file')
 
 
 def load_dataset(dataset_config):
@@ -48,16 +47,20 @@ def load_dataset(dataset_config):
                 **dataset_config['train_shuffle'])
 
     # Parse dataset
-    train_dataset = train_dataset.map(dataflow.get_gld_parser(
-            image_size=dataset_config['image_size'],
-            imagenet_augmentation=dataset_config['imagenet_crop']))
-    validation_dataset = validation_dataset.map(dataflow.get_gld_parser(
-            image_size=dataset_config['image_size'],
-            imagenet_augmentation=dataset_config['imagenet_crop']))
+    train_dataset = train_dataset.map(
+            dataflow.get_gld_parser(
+                image_size=dataset_config['image_size'],
+                imagenet_augmentation=dataset_config['imagenet_crop']),
+            num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    validation_dataset = validation_dataset.map(
+            dataflow.get_gld_parser(
+                image_size=dataset_config['image_size'],
+                imagenet_augmentation=dataset_config['imagenet_crop']),
+            num_parallel_calls=tf.data.experimental.AUTOTUNE)
     return train_dataset, validation_dataset
 
 
-def get_augmented(train_dataset, dataset_config):
+def get_augmented_dataset(train_dataset, dataset_config):
     """Perform data augmentations, if any"""
     if 'train_augmentations' not in dataset_config:
         return train_dataset
@@ -69,6 +72,11 @@ def get_augmented(train_dataset, dataset_config):
         train_dataset = train_dataset.map(
                 lambda image, label: (transformer.transform(image), label))
     return train_dataset
+
+
+def get_optimizer(algorithm, kwargs):
+    """Loads the specified optimizer from Keras with given kwargs"""
+    return getattr(keras_optimizers, algorithm)(**kwargs)
 
 
 def train(experiment,
@@ -84,21 +92,34 @@ def train(experiment,
 
     # Loading distribution strategy for TPU, CPU, and GPU
     distribution_strategy = train_utils.get_distribution_strategy()
+    num_replicas = distribution_strategy.num_replicas_in_sync
     train_constants.set_mode(gld_version)
 
     # Load training and validation datasets
     train_dataset, validation_dataset = load_dataset(dataset_config)
-    train_dataset = get_augmented(train_dataset, dataset_config)
-    log.info('Successfully configured the data flow')
+    train_dataset = get_augmented_dataset(train_dataset, dataset_config)
+
+    # Form into batches, depending on number of replicas
+    batch_size = training_config['batch_size'] * num_replicas
+    log.info(f'Batch size (adjusted for number of replicas): {batch_size}')
+    train_dataset = train_dataset.batch(batch_size)
+    train_dataset = train_dataset.prefetch(
+            tf.data.experimental.AUTOTUNE)
+    validation_dataset = validation_dataset.batch(batch_size)
+    validation_dataset = validation_dataset.prefetch(
+            tf.data.experimental.AUTOTUNE)
 
     # Load and compile model
     with distribution_strategy.scope(), StopWatch('Model compiled in:'):
         model = DelgModel(**model_config)
+        model.compile(
+            optimizer=get_optimizer(**training_config['optimizer']),
+            loss=['sparse_categorical_crossentropy'],
+            metrics=['sparse_categorical_accuracy'])
+
+    # Training loop
 
 
 if __name__ == '__main__':
-    args = argument_parser.parse_args()
-
-    with open(args.yaml_path, 'r') as f:
-        config = yaml.safe_load(f.read())
-        train(**config)
+    with open(argument_parser.parse_args().yaml_path, 'r') as f:
+        train(**yaml.safe_load(f.read()))
