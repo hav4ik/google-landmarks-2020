@@ -92,7 +92,7 @@ def test_cosface(training):
     assert outputs.shape == (batch_size, 10)
 
 
-def test_gem():
+def test_generalized_mean_pooling():
     last_layer_emb = tf.convert_to_tensor(np.random.rand(8, 6, 10, 16))
     gem = GeneralizedMeanPooling2D()
     output = gem(last_layer_emb).numpy()

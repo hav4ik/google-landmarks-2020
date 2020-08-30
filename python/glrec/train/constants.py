@@ -17,7 +17,7 @@ class _TrainingLoopConstants:
     """
 
     @property
-    class NUM_CLASSES(self):
+    def NUM_CLASSES(self):
         """Metadata about the Google Landmarks dataset."""
         return {
             'gld_v1': 14951,

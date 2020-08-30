@@ -1,3 +1,4 @@
+import datetime
 import colorlog
 import logging
 import os
@@ -61,3 +62,22 @@ class Log:
 log = Log()
 if 'VERBOSE' in os.environ:
     log.level(os.environ['VERBOSE'])
+
+
+class StopWatch:
+    def __init__(self, desc, log_level='info'):
+        self._desc = desc
+        self._log_func = {
+            logging.CRITICAL: log.crit,
+            logging.ERROR: log.err,
+            logging.WARNING: log.warn,
+            logging.INFO: log.info,
+            logging.DEBUG: log.debug
+        }[Log._parse_level(log_level)]
+
+    def __enter__(self):
+        self._time_start = datetime.datetime.now()
+
+    def __exit__(self, ex_type, ex_value, traceback):
+        time_stop = datetime.datetime.now()
+        self._log_func(self._desc + ' ' + str(time_stop - self._time_start))
