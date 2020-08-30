@@ -1,7 +1,9 @@
-dataset_config:
-  # Configure the dataset pipeline (paths, gcs creds,
-  # shuffling and augmentation configurations)
+gcs_project: null
 
+# Configure the dataset pipeline (paths, gcs creds,
+# shuffling and augmentation configurations)
+dataset_config:
+  dataset_version: gld_v2_clean
   image_size: [512, 512]
   imagenet_crop: false
 
@@ -20,8 +22,47 @@ dataset_config:
     seed: 17061998
 
   train_augmentations:
+    # Using only horizontal flips, as in Keetar's solution
     - class: TFImageTransform
       kwargs:
         horizontal_flip: true
         vertical_flip: false
         brightness_adjustments: false
+
+# Configure the training pipeline (batch size, model,
+# loss functions, etc.)
+training_config:
+  storage: /tmp/  # either a local dir, or gcs bucket
+
+  model:
+    # Currently, the following modes are supported:
+    #   - DELG: the DELG pipeline, as in the paper.
+    #   - Places365: train only the Place365 head.
+    training_method: DELG
+
+    # Backbone CNN config
+    backbone:
+      architecture: null
+      weights: null
+      trainable: true
+
+    # Global features extractor
+    global:
+      embedding:
+        pool:
+          method: GAP
+          kwargs: {}
+        dim: 512
+      head:
+        layer: ArcFace
+        kwargs: {}
+
+    # Local features extractor
+    local: null
+
+  # Epochs to warm up. There are 2 modes: epochs and batches.
+  # Sometimes we don't need the whole epoch to warm the head up.
+  head_warmup_batches: null
+
+  optimizer:
+    type: Adam

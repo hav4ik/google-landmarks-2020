@@ -1,4 +1,6 @@
+import os
 import tensorflow as tf
+import gcloud.storage as gcs
 from glrec.utils import log
 
 
@@ -26,6 +28,44 @@ def get_distribution_strategy():
 
     log.info('Replicas: ' + str(distribution_strategy.num_replicas_in_sync))
     return distribution_strategy
+
+
+def download_from_gcs(bucket_name,
+                      bucket_file_path,
+                      local_file_path):
+
+    if 'GOOGLE_APPLICATION_CREDENTIALS' not in os.environ:
+        raise RuntimeError(
+            'Environment variable GOOGLE_APPLICATION_CREDENTIALS not set.')
+
+    storage_client = gcs.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(bucket_file_path)
+    blob.download_to_filename(local_file_path)
+    log.info('Blob gs://{}/{} downloaded to {}.'.format(
+        bucket_name, bucket_file_path, local_file_path))
+
+
+def resolve_file_path(file_path):
+    """
+    If path is local, return the local path to file. If path is GCS, then
+    download the file to /tmp/glrec/ (under the same directory structure as
+    in the bucket), and return path to the local file.
+    """
+    gs_prefix = 'gs://'
+    if file_path[:len(gs_prefix)] != gs_prefix:
+        return os.path.expanduser(file_path)
+
+    bucket_name = file_path[len(gs_prefix):].split('/')[0]
+    gcs_file_path = file_path[len(gs_prefix) + len(bucket_name) + 1:]
+    directory_structure = os.path.dirname(file_path[len(gs_prefix):])
+    file_name = os.path.basename(file_path[len(gs_prefix):])
+    local_directory = os.path.join('/tmp/glrec', directory_structure)
+    if not os.path.isdir(local_directory):
+        os.makedirs(local_directory)
+    local_file_path = os.path.join(local_directory, file_name)
+    download_from_gcs(bucket_name, gcs_file_path, local_file_path)
+    return local_file_path
 
 
 if __name__ == '__main__':

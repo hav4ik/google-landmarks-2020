@@ -147,7 +147,7 @@ class AdaCos(Layer):
     def __init__(self,
                  num_classes,
                  m=0.5,
-                 is_dynamic=False,
+                 is_dynamic=True,
                  regularizer=None,
                  **kwargs):
 
