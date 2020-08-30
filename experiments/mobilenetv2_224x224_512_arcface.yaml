@@ -1,10 +1,23 @@
-gcs_project: null
+# Information about the experiment
+experiment:
+  name: '[mnetv2]_[224x224]_[512]_[GAP+ArcFace(30,0.5)]'
+  storage: /tmp/delg/
+  method: DELG
+  description: >
+    This is a toy experiment using MobileNetV2 as backbone.
+    The main purpose of this experiment is just for local
+    testing (and maybe some toy training).
 
-# Configure the dataset pipeline (paths, gcs creds,
-# shuffling and augmentation configurations)
+
+
+# Google Landmark Data Version
+gld_version: gld_v2_clean
+
+
+
+# Configure the dataset feeding pipeline
 dataset_config:
-  dataset_version: gld_v2_clean
-  image_size: [512, 512]
+  image_size: [224, 224, 3]
   imagenet_crop: false
 
   train_tfrecords:
@@ -29,40 +42,49 @@ dataset_config:
         vertical_flip: false
         brightness_adjustments: false
 
-# Configure the training pipeline (batch size, model,
-# loss functions, etc.)
+
+
+# Model configurations
+model_config:
+
+  # Backbone CNN configuration
+  backbone_config:
+    architecture: MobileNetV2
+    weights: gs://glc2020-chankhavu-experiments/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_224_no_top.h5
+    trainable: true
+
+  # Global branch: [backbone]->[pooling]->[dense]->[head]
+  global_branch_config:
+    # Currently, the following pooling methods are supported:
+    #   - GAP()
+    #   - GeM(p=3, train_p=True)
+    pooling_config:
+      method: GAP
+      kwargs: {}
+
+    # Embedding after pooling (output units of a Dense layer
+    # without activation function because the backbone already
+    # have it, and without bias.
+    embedding_dim: 512
+
+    # Currently, the following heads are supported:
+    #   - ArcFace(s=30, m=0.5)
+    #   - ArcMarginProduct(s=30, m=0.5, easy_margin=False)
+    #   - AdaCos(m=0.5, is_dynamic=True)
+    #   - CosFace(s=30, m=0.35)
+    head_config:
+      layer: ArcFace
+      kwargs:
+        s: 30.0
+        m: 0.5
+
+  # Local features extractor
+  local_branch_config: null
+
+
+
+# Configuration of the training process
 training_config:
-  storage: /tmp/  # either a local dir, or gcs bucket
-
-  model:
-    # Currently, the following modes are supported:
-    #   - DELG: the DELG pipeline, as in the paper.
-    #   - Places365: train only the Place365 head.
-    training_method: DELG
-
-    # Backbone CNN config
-    backbone:
-      architecture: null
-      weights: null
-      trainable: true
-
-    # Global features extractor
-    global:
-      embedding:
-        pool:
-          method: GAP
-          kwargs: {}
-        dim: 512
-      head:
-        layer: ArcFace
-        kwargs: {}
-
-    # Local features extractor
-    local: null
-
-  # Epochs to warm up. There are 2 modes: epochs and batches.
-  # Sometimes we don't need the whole epoch to warm the head up.
-  head_warmup_batches: null
-
   optimizer:
-    type: Adam
+    algorithm: Adam
+    kwargs: {}

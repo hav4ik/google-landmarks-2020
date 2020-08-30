@@ -1,7 +1,7 @@
 import os
 import tensorflow as tf
 import gcloud.storage as gcs
-from glrec.utils import log
+from glrec.utils import log, StopWatch
 
 
 def get_distribution_strategy():
@@ -38,12 +38,13 @@ def download_from_gcs(bucket_name,
         raise RuntimeError(
             'Environment variable GOOGLE_APPLICATION_CREDENTIALS not set.')
 
-    storage_client = gcs.Client()
-    bucket = storage_client.bucket(bucket_name)
-    blob = bucket.blob(bucket_file_path)
-    blob.download_to_filename(local_file_path)
-    log.info('Blob gs://{}/{} downloaded to {}.'.format(
-        bucket_name, bucket_file_path, local_file_path))
+    info_string = 'Blob gs://{}/{} downloaded to {} in:'.format(
+            bucket_name, bucket_file_path, local_file_path)
+    with StopWatch(info_string):
+        storage_client = gcs.Client()
+        bucket = storage_client.bucket(bucket_name)
+        blob = bucket.blob(bucket_file_path)
+        blob.download_to_filename(local_file_path)
 
 
 def resolve_file_path(file_path):
@@ -64,7 +65,10 @@ def resolve_file_path(file_path):
     if not os.path.isdir(local_directory):
         os.makedirs(local_directory)
     local_file_path = os.path.join(local_directory, file_name)
-    download_from_gcs(bucket_name, gcs_file_path, local_file_path)
+    if not os.path.isfile(local_file_path):
+        download_from_gcs(bucket_name, gcs_file_path, local_file_path)
+    else:
+        log.info(f'Found {local_file_path} locally. No downloads needed.')
     return local_file_path
 
 
