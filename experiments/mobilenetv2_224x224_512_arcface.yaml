@@ -31,7 +31,7 @@ dataset_config:
     shards: 128
 
   train_shuffle:
-    buffer_size: 128
+    buffer_size: 2048
     seed: 17061998
 
   train_augmentations:
@@ -50,7 +50,7 @@ model_config:
   # Backbone CNN configuration
   backbone_config:
     architecture: MobileNetV2
-    weights: gs://glc2020-chankhavu-experiments/mobilenet_v2_weights_tf_dim_ordering_tf_kernels_1.0_224_no_top.h5
+    weights: imagenet
     trainable: true
 
   # Global branch: [backbone]->[pooling]->[dense]->[head]
@@ -85,6 +85,11 @@ model_config:
 
 # Configuration of the training process
 training_config:
+  batch_size: 8
+  epochs: 30
   optimizer:
-    algorithm: Adam
-    kwargs: {}
+    algorithm: SGD
+    kwargs:
+      learning_rate: 0.001
+      momentum: 0.9
+      decay: 0.00001
