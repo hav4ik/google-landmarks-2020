@@ -1,5 +1,6 @@
 import os
 import math
+import subprocess
 import tensorflow as tf
 import gcloud.storage as gcs
 from glrec.utils import log, StopWatch
@@ -117,3 +118,12 @@ def resolve_scalars_for_tpu(parsed_yaml, num_replicas):
                 for item in parsed_yaml]
     else:
         return parsed_yaml
+
+
+def cmdline_sync_dir_with_gcs(local_directory, gcs_directory, wait=False):
+    sync_process = subprocess.Popen([
+        'gsutil', '-m', 'rsync', '-r',
+        '{}'.format(local_directory),
+        '{}'.format(gcs_directory)])
+    if wait:
+        sync_process.wait()

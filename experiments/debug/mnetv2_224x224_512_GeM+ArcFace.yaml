@@ -1,8 +1,8 @@
 # Information about the experiment
 experiment:
-  name: '[mnetv2]_[224x224]_[512]_[GAP+ArcFace(30,0.5)]'
-  storage: /tmp/delg/
-  method: DELG
+  name: mnetv2_224x224_512_GAP+ArcFace_debug
+  storage: gs://glc2020-chankhavu-experiments/test
+  mode: debug
   description: >
     This is a toy experiment using MobileNetV2 as backbone.
     The main purpose of this experiment is just for local
@@ -90,7 +90,9 @@ training_config:
   batch_size:
     v: 2
     tpu: lin
+
   epochs: 2
+  samples_per_epoch: 2
 
   optimizer:
     algorithm: SGD
