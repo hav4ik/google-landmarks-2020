@@ -1,4 +1,5 @@
 import os
+import math
 import tensorflow as tf
 import gcloud.storage as gcs
 from glrec.utils import log, StopWatch
@@ -72,5 +73,47 @@ def resolve_file_path(file_path):
     return local_file_path
 
 
-if __name__ == '__main__':
-    strategy = get_distribution_strategy()
+def resolve_scalars_for_tpu(parsed_yaml, num_replicas):
+    """
+    Finds leaf nodes in a parsed_yaml (with `yaml.safe_load`) with the
+    following structure:
+
+      key:
+        v: int or float value
+        tpu: scaling strategy, either 'lin', 'log', or 'sqrt'
+
+    where `scaling_strategy` can be either 'linear' or 'logarithmic'.
+    """
+    if isinstance(parsed_yaml, dict):
+        if set(parsed_yaml.keys()).issubset({'v', 'tpu', 't'}) and \
+                {'v', 'tpu'}.issubset(set(parsed_yaml.keys())) and \
+                (
+                    isinstance(parsed_yaml['v'], int) or
+                    isinstance(parsed_yaml['v'], float)
+                ) and \
+                isinstance(parsed_yaml['tpu'], str):
+            if parsed_yaml['tpu'] == 'lin':
+                val = type(parsed_yaml['v'])(parsed_yaml['v'] * num_replicas)
+                log.debug(f'Resolved <{parsed_yaml}> to <{val}> (strat=lin)')
+                return val
+            elif parsed_yaml['tpu'] == 'log':
+                val = type(parsed_yaml['v'])(
+                        parsed_yaml['v'] * (1. + math.log(num_replicas)))
+                log.debug(f'Resolved <{parsed_yaml}> to <{val}> (strat=log)')
+                return val
+            elif parsed_yaml['tpu'] == 'sqrt':
+                val = type(parsed_yaml['v'])(
+                        parsed_yaml['v'] * math.sqrt(num_replicas))
+                log.debug(f'Resolved <{parsed_yaml}> to <{val}> (strat=sqrt)')
+                return val
+            else:
+                raise ValueError('Scaling strategy (`tpu`) can only be '
+                                 '"lin", "log", or "sqrt".')
+        else:
+            return dict([(key, resolve_scalars_for_tpu(value, num_replicas))
+                        for key, value in parsed_yaml.items()])
+    elif isinstance(parsed_yaml, list):
+        return [resolve_scalars_for_tpu(item, num_replicas)
+                for item in parsed_yaml]
+    else:
+        return parsed_yaml
