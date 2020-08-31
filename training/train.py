@@ -20,6 +20,8 @@ argument_parser = ArgumentParser(
         description='Training script for Google Landmarks Challenge 2020')
 argument_parser.add_argument('yaml_path', type=str,
                              help='Path to the YAML experiment config file')
+argument_parser.add_argument('-d', '--debug', action='store_true',
+                             help='Whether to run in debug mode')
 
 
 def load_dataset(dataset_config):
@@ -122,7 +124,8 @@ def train_delg(experiment,
                glc_config,
                dataset_config,
                model_config,
-               training_config):
+               training_config,
+               debug_mode=False):
     """Grand Training Loop for Google Landmarks Challenge 2020
     """
     log.info('Started Experiment: ' + experiment['name'])
@@ -207,7 +210,7 @@ def train_delg(experiment,
     samples_per_epoch = training_config['samples_per_epoch']
 
     # Limit batch size and dataset sizes in debug mode
-    if experiment['mode'] == 'debug':
+    if debug_mode:
         log.warning('Debug mode is enabled. You can disable it in '
                     '"experiment" settings')
 
@@ -277,12 +280,19 @@ def train_delg(experiment,
         os.path.join(checkpoints_dir,
                      '{epoch:03d}_val_loss={val_loss:.5f}.hdf5'),
         save_freq='epoch')
+
+    if experiment['storage'][:5] == 'gs://':
+        # This is necessary for TPU training
+        tb_log_dir = os.path.join(
+                experiment['storage'], experiment['name'], 'tensorboard')
+        log.debug('Setting TensorBoard to write to GCS bucket.')
+    else:
+        tb_log_dir = tensorboard_dir
+
     tensorboard_callback = tf.keras.callbacks.TensorBoard(
-            log_dir=tensorboard_dir,
-            histogram_freq=1,
+            log_dir=tb_log_dir,
             write_graph=False,
-            update_freq='epoch',
-            profile_batch=2)
+            update_freq='epoch')
     training_callbacks = [checkpoints_callback, tensorboard_callback]
 
     # Additional callbacks required from the config
@@ -318,5 +328,6 @@ def train_delg(experiment,
 
 
 if __name__ == '__main__':
-    with open(argument_parser.parse_args().yaml_path, 'r') as f:
-        train_delg(**yaml.safe_load(f.read()))
+    args = argument_parser.parse_args()
+    with open(args.yaml_path, 'r') as f:
+        train_delg(debug_mode=args.debug, **yaml.safe_load(f.read()))

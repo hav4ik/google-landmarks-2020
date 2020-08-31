@@ -2,7 +2,6 @@
 experiment:
   name: EffB7--512x512--512--GAP+CosFace__001-global
   storage: gs://glc2020-chankhavu-experiments/keetar/EffB7
-  mode: deploy
   description: Copy the strategy of Keetar
 
 
