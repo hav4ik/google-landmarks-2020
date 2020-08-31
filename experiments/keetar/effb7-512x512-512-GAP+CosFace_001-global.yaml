@@ -1,23 +1,22 @@
 # Information about the experiment
 experiment:
-  name: '[mnetv2]_[224x224]_[512]_[GAP+ArcFace(30,0.5)]'
-  storage: /tmp/delg/
-  method: DELG
-  description: >
-    This is a toy experiment using MobileNetV2 as backbone.
-    The main purpose of this experiment is just for local
-    testing (and maybe some toy training).
+  name: EffB7--512x512--512--GAP+CosFace__001-global
+  storage: gs://glc2020-chankhavu-experiments/keetar/EffB7
+  mode: deploy
+  description: Copy the strategy of Keetar
 
 
 
-# Google Landmark Data Version
-gld_version: gld_v2_clean
+# Competition-specific configuration
+glc_config:
+  gld_version: gld_v2_clean
+  gld_id_mapping: gs://gld-v2-clean/gld-v2-clean-id-mapping.csv
 
 
 
 # Configure the dataset feeding pipeline
 dataset_config:
-  image_size: [224, 224, 3]
+  image_size: [512, 512, 3]
   imagenet_crop: false
 
   train_tfrecords:
@@ -49,15 +48,15 @@ model_config:
 
   # Backbone CNN configuration
   backbone_config:
-    architecture: MobileNetV2
-    weights: imagenet
+    architecture: EfficientNetB7
+    weights: noisy-student
     trainable: true
 
   # Global branch: [backbone]->[pooling]->[dense]->[head]
   global_branch_config:
     # Currently, the following pooling methods are supported:
     #   - GAP()
-    #   - GeM(p=3, train_p=True)
+    #   - GeM(p=3, train_p=False)
     pooling_config:
       method: GAP
       kwargs: {}
@@ -73,23 +72,50 @@ model_config:
     #   - AdaCos(m=0.5, is_dynamic=True)
     #   - CosFace(s=30, m=0.35)
     head_config:
-      layer: ArcFace
+      layer: CosFace
       kwargs:
-        s: 30.0
-        m: 0.5
+        s: 15.98916767 # = sqrt(2) * log(C-1), where C=81313
+        m: 0.0 # Keetar used this margin
 
   # Local features extractor
   local_branch_config: null
+
+  # Places classifier
+  places_branch_config: null
 
 
 
 # Configuration of the training process
 training_config:
-  batch_size: 8
-  epochs: 30
+
+  # Keetar used 8 batch size for 512x512
+  batch_size:
+    v: 8
+    tpu: lin
+
+  epochs: 40
+  samples_per_epoch: 1264376 # 80% from 1580470
+
+  # Using SDG, with settings as suggested by Keetar:
+  # lr 1e-3 (adjusted for GPU), 0.9 momentum, and 1e-5 decay
   optimizer:
     algorithm: SGD
     kwargs:
-      learning_rate: 0.001
+      learning_rate:
+        v: 0.001 # 1e-3
+        tpu: sqrt
       momentum: 0.9
-      decay: 0.00001
+      decay: 0.00001 # 1e-5
+
+  # Keetar used weights proportional to 1/log(class cnt + 1)
+  class_weights: inv_log
+
+  # Not supported yet
+  learning_rate_scheduler: null
+
+  # We train until convergence, i.e. till val_loss not increasing
+  additional_callbacks:
+    - callback: EarlyStopping
+      kwargs:
+        monitor: val_loss
+        patience: 5

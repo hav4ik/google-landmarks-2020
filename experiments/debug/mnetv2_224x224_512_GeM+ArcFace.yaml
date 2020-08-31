@@ -1,0 +1,125 @@
+# Information about the experiment
+experiment:
+  name: mnetv2_224x224_512_GAP+ArcFace_debug
+  storage: gs://glc2020-chankhavu-experiments/test
+  mode: debug
+  description: >
+    This is a toy experiment using MobileNetV2 as backbone.
+    The main purpose of this experiment is just for local
+    testing (and maybe some toy training).
+
+
+
+# Competition-specific configuration
+glc_config:
+  gld_version: gld_v2_clean
+  gld_id_mapping: gs://gld-v2-clean/gld-v2-clean-id-mapping.csv
+
+
+
+# Configure the dataset feeding pipeline
+dataset_config:
+  image_size: [224, 224, 3]
+  imagenet_crop: false
+
+  train_tfrecords:
+    tfrecord_dir: gs://gld-v2-clean/gldv2_dataset/tfrecord/
+    basename: validation
+    shards: 128
+
+  validation_tfrecords:
+    tfrecord_dir: gs://gld-v2-clean/gldv2_dataset/tfrecord/
+    basename: validation
+    shards: 128
+
+  train_shuffle:
+    buffer_size: 40
+    seed: 17061998
+
+  train_augmentations:
+    # Using only horizontal flips, as in Keetar's solution
+    - class: TFImageTransform
+      kwargs:
+        horizontal_flip: true
+        vertical_flip: false
+        brightness_adjustments: false
+
+
+
+# Model configurations
+model_config:
+
+  # Backbone CNN configuration
+  backbone_config:
+    architecture: MobileNetV2
+    weights: imagenet
+    trainable: true
+
+  # Global branch: [backbone]->[pooling]->[dense]->[head]
+  global_branch_config:
+    # Currently, the following pooling methods are supported:
+    #   - GAP()
+    #   - GeM(p=3, train_p=False)
+    pooling_config:
+      method: GAP
+      kwargs: {}
+
+    # Embedding after pooling (output units of a Dense layer
+    # without activation function because the backbone already
+    # have it, and without bias.
+    embedding_dim: 512
+
+    # Currently, the following heads are supported:
+    #   - ArcFace(s=30, m=0.5)
+    #   - ArcMarginProduct(s=30, m=0.5, easy_margin=False)
+    #   - AdaCos(m=0.5, is_dynamic=True)
+    #   - CosFace(s=30, m=0.35)
+    head_config:
+      layer: CosFace
+      kwargs:
+        s: 15.98916767 # = sqrt(2) * log(C-1), where C=81313
+        m: 0.0 # Keetar used this margin
+
+  # Local features extractor
+  local_branch_config: null
+
+  # Places classifier
+  places_branch_config: null
+
+
+
+# Configuration of the training process
+training_config:
+
+  # Keetar used 8 batch size for 512x512
+  batch_size:
+    v: 8
+    tpu: lin
+
+  initial_epoch: 0
+  epochs: 50
+  samples_per_epoch: 1264376 # 80% from 1580470
+
+  # Using SDG, with settings as suggested by Keetar:
+  # lr 1e-3 (adjusted for GPU), 0.9 momentum, and 1e-5 decay
+  optimizer:
+    algorithm: SGD
+    kwargs:
+      learning_rate:
+        v: 0.001 # 1e-3
+        tpu: sqrt
+      momentum: 0.9
+      decay: 0.00001 # 1e-5
+
+  # Keetar used weights proportional to 1/log(class cnt + 1)
+  class_weights: inv_log
+
+  # Not supported yet
+  learning_rate_scheduler: null
+
+  # We train until convergence, i.e. till val_loss not increasing
+  additional_callbacks:
+    - callback: EarlyStopping
+      kwargs:
+        monitor: val_loss
+        patience: 5

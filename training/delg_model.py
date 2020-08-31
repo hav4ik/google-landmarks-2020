@@ -35,7 +35,7 @@ _backbone_architecture_module = {
 }
 
 
-def load_backbone_model(architecture, weights, trainable):
+def load_backbone_model(architecture, weights, trainable=True):
     network_module = _backbone_architecture_module[architecture]
     weights_file = None
     if weights not in [None, 'imagenet', 'noisy-student']:
@@ -93,13 +93,15 @@ class DelgGlobalBranch(tf.keras.layers.Layer):
         self._pool_features = load_pooling_layer(**pooling_config)
         self._reduce_dimensionality = keras_layers.Dense(embedding_dim)
         self._cosine_head = load_global_head(**head_config)
+        self._softmax = tf.keras.layers.Softmax()
 
     def call(self, inputs):
         backbone_features, labels = inputs
         pooled_features = self._pool_features(backbone_features)
         dim_reduced_features = self._reduce_dimensionality(pooled_features)
         output_logits = self._cosine_head([dim_reduced_features, labels])
-        return output_logits
+        output = self._softmax(output_logits)
+        return output
 
 
 class DelgModel(tf.keras.Model):
@@ -109,6 +111,7 @@ class DelgModel(tf.keras.Model):
                  backbone_config,
                  global_branch_config,
                  local_branch_config,
+                 places_branch_config,
                  **kwargs):
 
         super().__init__(**kwargs)
@@ -118,5 +121,5 @@ class DelgModel(tf.keras.Model):
     def call(self, inputs):
         input_image, sparse_label = inputs
         backbone_features = self.backbone(input_image)
-        global_logits = self.global_branch([backbone_features, sparse_label])
-        return global_logits
+        global_output = self.global_branch([backbone_features, sparse_label])
+        return global_output
