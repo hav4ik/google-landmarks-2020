@@ -85,11 +85,22 @@ model_config:
 
 # Configuration of the training process
 training_config:
-  batch_size: 8
+  batch_size:
+    v: 8
+    tpu: lin
   epochs: 30
+
   optimizer:
     algorithm: SGD
     kwargs:
-      learning_rate: 0.001
+      learning_rate: 0.001 # 1e-3
       momentum: 0.9
-      decay: 0.00001
+      decay: 0.00001 # 1e-5
+
+  learning_rate_scheduler: null
+
+  callbacks:
+    - callback: EarlyStopping
+      kwargs:
+        monitor: val_loss
+        patience: 5

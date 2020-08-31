@@ -9,6 +9,7 @@ from glrec.train import utils as train_utils
 from glrec.train.constants import constants as train_constants
 from glrec.utils import log, StopWatch
 from delg_model import DelgModel
+from callbacks import get_callback
 
 
 argument_parser = ArgumentParser(
@@ -92,15 +93,22 @@ def train(experiment,
 
     # Loading distribution strategy for TPU, CPU, and GPU
     distribution_strategy = train_utils.get_distribution_strategy()
-    num_replicas = distribution_strategy.num_replicas_in_sync
     train_constants.set_mode(gld_version)
+
+    # Resolve all scalars in configurations to adjust them for TPU
+    dataset_config = train_utils.resolve_scalars_for_tpu(
+            dataset_config, distribution_strategy.num_replicas_in_sync)
+    model_config = train_utils.resolve_scalars_for_tpu(
+            model_config, distribution_strategy.num_replicas_in_sync)
+    training_config = train_utils.resolve_scalars_for_tpu(
+            training_config, distribution_strategy.num_replicas_in_sync)
 
     # Load training and validation datasets
     train_dataset, validation_dataset = load_dataset(dataset_config)
     train_dataset = get_augmented_dataset(train_dataset, dataset_config)
 
     # Form into batches, depending on number of replicas
-    batch_size = training_config['batch_size'] * num_replicas
+    batch_size = training_config['batch_size']
     log.info(f'Batch size (adjusted for number of replicas): {batch_size}')
     train_dataset = train_dataset.batch(batch_size)
     train_dataset = train_dataset.prefetch(
@@ -116,6 +124,11 @@ def train(experiment,
             optimizer=get_optimizer(**training_config['optimizer']),
             loss=['sparse_categorical_crossentropy'],
             metrics=['sparse_categorical_accuracy'])
+
+    # Load callbacks, from keras_callbacks and custom ones
+    callbacks = []
+    for callback_config_item in training_config['callbacks']:
+        callbacks.append(get_callback(**callback_config_item))
 
     # Training loop
 
