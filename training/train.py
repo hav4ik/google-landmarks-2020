@@ -12,6 +12,7 @@ from glrec.train import utils as train_utils
 from glrec.train.constants import constants as train_constants
 from glrec.utils import log, StopWatch
 from delg_model import DelgModel
+from callbacks import GsutilRsync
 from callbacks import get_callback
 
 
@@ -149,17 +150,18 @@ def train_delg(experiment,
 
     # Map labels if necessary (for gld-v2-clean)
     if label_mapping_df is not None:
+        table = tf.lookup.StaticHashTable(
+             tf.lookup.KeyValueTensorInitializer(
+                 keys=tf.constant(
+                     np.array(label_mapping_df['landmark_id']),
+                     dtype=tf.int64),
+                 values=tf.constant(
+                     np.array(label_mapping_df['squeezed_id']),
+                     dtype=tf.int64)),
+             default_value=np.argmax(np.array(
+                 label_mapping_df['num_samples'])))
+
         def label_mapping_func(image, label):
-            table = tf.lookup.StaticHashTable(
-                tf.lookup.KeyValueTensorInitializer(
-                    keys=tf.constant(
-                        np.array(label_mapping_df['landmark_id']),
-                        dtype=tf.int64),
-                    values=tf.constant(
-                        np.array(label_mapping_df['squeezed_id']),
-                        dtype=tf.int64)),
-                default_value=np.argmax(np.array(
-                    label_mapping_df['num_samples'])))
             return image, table.lookup(label)
 
         train_dataset = train_dataset.map(
@@ -172,6 +174,24 @@ def train_delg(experiment,
     # Form into batches, depending on number of replicas
     batch_size = training_config['batch_size']
     log.info(f'Batch size (adjusted for number of replicas): {batch_size}')
+    epochs = training_config['epochs']
+    samples_per_epoch = training_config['samples_per_epoch']
+
+    # Limit batch size and dataset sizes in debug mode
+    if experiment['mode'] == 'debug':
+        log.warning('Debug mode is enabled. You can disable it in '
+                    '"experiment" settings')
+
+        batch_size = 2 * distribution_strategy.num_replicas_in_sync
+        log.warning(f'Batch size is limited to {batch_size} in debug mode.')
+
+        train_dataset = train_dataset.take(2 * batch_size)
+        validation_dataset = validation_dataset.take(2 * batch_size)
+        log.warning(f'Train and Val datasets limited to {2 * batch_size} '
+                    'samples in debug mode.')
+
+        epochs, samples_per_epoch = 2, 2 * batch_size
+        log.warning('Number of epochs is limited to 2 in debug mode.')
 
     train_dataset = train_dataset.batch(batch_size)
     train_dataset = train_dataset.prefetch(
@@ -220,28 +240,31 @@ def train_delg(experiment,
             write_graph=False,
             update_freq='epoch',
             profile_batch=2)
-    callbacks = [checkpoints_callback, tensorboard_callback]
+    training_callbacks = [checkpoints_callback, tensorboard_callback]
 
-    # If storing on GCS, call `gsutil rsync` after each epoch
+    # Additional callbacks required from the config
+    for callback_config_item in training_config['additional_callbacks']:
+        training_callbacks.append(get_callback(**callback_config_item))
+
+    # If storing on GCS, call `gsutil rsync` after each epoch.
+    # This is added as last callback, since it is supposed to be
+    # called after model and tensorboard saving.
     if experiment['storage'][:5] == 'gs://':
-        gsutil_rsync_callback = callbacks.GsutilRsync(
+        gsutil_rsync_callback = GsutilRsync(
                 experiment_dir,
                 os.path.join(experiment['storage'], experiment['name']))
-        callbacks.append(gsutil_rsync_callback)
-
-    for callback_config_item in training_config['additional_callbacks']:
-        callbacks.append(get_callback(**callback_config_item))
+        training_callbacks.append(gsutil_rsync_callback)
 
     # ------------------------------------------------------------
     #   MODEL TRAINING
     # ------------------------------------------------------------
 
     model.fit(train_dataset,
-              steps_per_epoch=5,
-              epochs=training_config['epochs'],
-              callbacks=callbacks,
+              steps_per_epoch=samples_per_epoch // batch_size,
+              epochs=epochs,
+              callbacks=training_callbacks,
               validation_data=validation_dataset,
-              verbose=2)
+              verbose=1)
 
 
 if __name__ == '__main__':
