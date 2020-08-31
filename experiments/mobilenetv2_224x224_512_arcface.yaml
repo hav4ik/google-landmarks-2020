@@ -10,8 +10,10 @@ experiment:
 
 
 
-# Google Landmark Data Version
-gld_version: gld_v2_clean
+# Competition-specific configuration
+glc_config:
+  gld_version: gld_v2_clean
+  gld_id_mapping: gs://gld-v2-clean/gld-v2-clean-id-mapping.csv
 
 
 
@@ -22,7 +24,7 @@ dataset_config:
 
   train_tfrecords:
     tfrecord_dir: gs://gld-v2-clean/gldv2_dataset/tfrecord/
-    basename: train
+    basename: validation
     shards: 128
 
   validation_tfrecords:
@@ -31,7 +33,7 @@ dataset_config:
     shards: 128
 
   train_shuffle:
-    buffer_size: 2048
+    buffer_size: 40
     seed: 17061998
 
   train_augmentations:
@@ -86,20 +88,22 @@ model_config:
 # Configuration of the training process
 training_config:
   batch_size:
-    v: 8
+    v: 2
     tpu: lin
-  epochs: 30
+  epochs: 2
 
   optimizer:
     algorithm: SGD
     kwargs:
-      learning_rate: 0.001 # 1e-3
+      learning_rate:
+        v: 0.001 # 1e-3
+        tpu: sqrt
       momentum: 0.9
       decay: 0.00001 # 1e-5
 
   learning_rate_scheduler: null
 
-  callbacks:
+  additional_callbacks:
     - callback: EarlyStopping
       kwargs:
         monitor: val_loss
