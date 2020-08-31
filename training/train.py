@@ -1,5 +1,8 @@
+import os
 from argparse import ArgumentParser
 import yaml
+import pandas as pd
+import numpy as np
 import tensorflow as tf
 from tensorflow.keras import optimizers as keras_optimizers
 
@@ -80,20 +83,40 @@ def get_optimizer(algorithm, kwargs):
     return getattr(keras_optimizers, algorithm)(**kwargs)
 
 
-def train(experiment,
-          gld_version,
-          dataset_config,
-          model_config,
-          training_config):
+def prepare_dirs(storage_root, experiment_name):
+    if storage_root[:5] == 'gs://':
+        storage_root = '/tmp/glc/'
+    else:
+        storage_root = os.path.expanduser(storage_root)
+    experiment_dir = os.path.join(storage_root, experiment_name)
+    checkpoints_dir = os.path.join(experiment_dir, 'checkpoints')
+    tensorboard_dir = os.path.join(experiment_dir, 'tensorboard')
+
+    if not os.path.isdir(checkpoints_dir):
+        os.makedirs(checkpoints_dir)
+    if not os.path.isdir(tensorboard_dir):
+        os.makedirs(tensorboard_dir)
+    return experiment_dir, checkpoints_dir, tensorboard_dir
+
+
+def train_delg(experiment,
+               glc_config,
+               dataset_config,
+               model_config,
+               training_config):
     """Grand Training Loop for Google Landmarks Challenge 2020
     """
     log.info('Started Experiment: ' + experiment['name'])
     log.info('All data will be saved to: ' + experiment['storage'])
     log.info('Experiment description: ' + experiment['description'])
 
+    # ------------------------------------------------------------
+    #   PREPARE ENVIRONMENT AND CONFIGURATIONS
+    # ------------------------------------------------------------
+
     # Loading distribution strategy for TPU, CPU, and GPU
     distribution_strategy = train_utils.get_distribution_strategy()
-    train_constants.set_mode(gld_version)
+    train_constants.set_mode(glc_config['gld_version'])
 
     # Resolve all scalars in configurations to adjust them for TPU
     dataset_config = train_utils.resolve_scalars_for_tpu(
@@ -103,36 +126,124 @@ def train(experiment,
     training_config = train_utils.resolve_scalars_for_tpu(
             training_config, distribution_strategy.num_replicas_in_sync)
 
+    # Directories to store models and logs
+    experiment_dir, checkpoints_dir, tensorboard_dir = \
+        prepare_dirs(experiment['storage'], experiment['name'])
+
+    # Class ID mapping and counts
+    label_mapping_df = None
+    if 'gld_id_mapping' in glc_config and \
+            glc_config['gld_id_mapping'] is not None:
+        label_mapping_csv_path = train_utils.resolve_file_path(
+                glc_config['gld_id_mapping'])
+        if os.path.isfile(label_mapping_csv_path):
+            label_mapping_df = pd.read_csv(label_mapping_csv_path)
+
+    # ------------------------------------------------------------
+    #   PREPARE TRAINING AND TESTING DATASETS
+    # ------------------------------------------------------------
+
     # Load training and validation datasets
     train_dataset, validation_dataset = load_dataset(dataset_config)
     train_dataset = get_augmented_dataset(train_dataset, dataset_config)
 
+    # Map labels if necessary (for gld-v2-clean)
+    if label_mapping_df is not None:
+        def label_mapping_func(image, label):
+            table = tf.lookup.StaticHashTable(
+                tf.lookup.KeyValueTensorInitializer(
+                    keys=tf.constant(
+                        np.array(label_mapping_df['landmark_id']),
+                        dtype=tf.int64),
+                    values=tf.constant(
+                        np.array(label_mapping_df['squeezed_id']),
+                        dtype=tf.int64)),
+                default_value=np.argmax(np.array(
+                    label_mapping_df['num_samples'])))
+            return image, table.lookup(label)
+
+        train_dataset = train_dataset.map(
+                label_mapping_func,
+                num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        validation_dataset = validation_dataset.map(
+                label_mapping_func,
+                num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
     # Form into batches, depending on number of replicas
     batch_size = training_config['batch_size']
     log.info(f'Batch size (adjusted for number of replicas): {batch_size}')
+
     train_dataset = train_dataset.batch(batch_size)
     train_dataset = train_dataset.prefetch(
-            tf.data.experimental.AUTOTUNE)
+            buffer_size=tf.data.experimental.AUTOTUNE)
+
     validation_dataset = validation_dataset.batch(batch_size)
     validation_dataset = validation_dataset.prefetch(
-            tf.data.experimental.AUTOTUNE)
+            buffer_size=tf.data.experimental.AUTOTUNE)
+
+    # Training loop. Datasets are adjusted to Keras format
+    def to_keras_format(image, label):
+        label = tf.squeeze(label)
+        return (image, label), label
+
+    train_dataset = train_dataset.map(
+            to_keras_format,
+            num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    validation_dataset = validation_dataset.map(
+            to_keras_format,
+            num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    # ------------------------------------------------------------
+    #   PREPARE THE MODEL
+    # ------------------------------------------------------------
 
     # Load and compile model
     with distribution_strategy.scope(), StopWatch('Model compiled in:'):
         model = DelgModel(**model_config)
         model.compile(
-            optimizer=get_optimizer(**training_config['optimizer']),
-            loss=['sparse_categorical_crossentropy'],
-            metrics=['sparse_categorical_accuracy'])
+                optimizer=get_optimizer(**training_config['optimizer']),
+                loss=['sparse_categorical_crossentropy'],
+                metrics=['sparse_categorical_accuracy'])
 
-    # Load callbacks, from keras_callbacks and custom ones
-    callbacks = []
-    for callback_config_item in training_config['callbacks']:
+    # ------------------------------------------------------------
+    #   PREPARE TRAINING CALLBACKS
+    # ------------------------------------------------------------
+
+    # Tensorboard and ModelCheckpoint callbacks
+    checkpoints_callback = tf.keras.callbacks.ModelCheckpoint(
+        os.path.join(checkpoints_dir,
+                     '{epoch:03d}_val_loss={val_loss:.5f}.hdf5'),
+        save_freq='epoch')
+    tensorboard_callback = tf.keras.callbacks.TensorBoard(
+            log_dir=tensorboard_dir,
+            histogram_freq=1,
+            write_graph=False,
+            update_freq='epoch',
+            profile_batch=2)
+    callbacks = [checkpoints_callback, tensorboard_callback]
+
+    # If storing on GCS, call `gsutil rsync` after each epoch
+    if experiment['storage'][:5] == 'gs://':
+        gsutil_rsync_callback = callbacks.GsutilRsync(
+                experiment_dir,
+                os.path.join(experiment['storage'], experiment['name']))
+        callbacks.append(gsutil_rsync_callback)
+
+    for callback_config_item in training_config['additional_callbacks']:
         callbacks.append(get_callback(**callback_config_item))
 
-    # Training loop
+    # ------------------------------------------------------------
+    #   MODEL TRAINING
+    # ------------------------------------------------------------
+
+    model.fit(train_dataset,
+              steps_per_epoch=5,
+              epochs=training_config['epochs'],
+              callbacks=callbacks,
+              validation_data=validation_dataset,
+              verbose=2)
 
 
 if __name__ == '__main__':
     with open(argument_parser.parse_args().yaml_path, 'r') as f:
-        train(**yaml.safe_load(f.read()))
+        train_delg(**yaml.safe_load(f.read()))
