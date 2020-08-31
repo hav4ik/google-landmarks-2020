@@ -1,12 +1,9 @@
 # Information about the experiment
 experiment:
-  name: mnetv2_224x224_512_GAP+ArcFace_debug
-  storage: gs://glc2020-chankhavu-experiments/test
-  mode: debug
-  description: >
-    This is a toy experiment using MobileNetV2 as backbone.
-    The main purpose of this experiment is just for local
-    testing (and maybe some toy training).
+  name: EffB7--512x512--512--GAP+CosFace__001-global
+  storage: gs://glc2020-chankhavu-experiments/keetar/EffB7
+  mode: deploy
+  description: Copy the strategy of Keetar
 
 
 
@@ -19,12 +16,12 @@ glc_config:
 
 # Configure the dataset feeding pipeline
 dataset_config:
-  image_size: [224, 224, 3]
+  image_size: [512, 512, 3]
   imagenet_crop: false
 
   train_tfrecords:
     tfrecord_dir: gs://gld-v2-clean/gldv2_dataset/tfrecord/
-    basename: validation
+    basename: train
     shards: 128
 
   validation_tfrecords:
@@ -33,7 +30,7 @@ dataset_config:
     shards: 128
 
   train_shuffle:
-    buffer_size: 40
+    buffer_size: 2048
     seed: 17061998
 
   train_augmentations:
@@ -51,8 +48,8 @@ model_config:
 
   # Backbone CNN configuration
   backbone_config:
-    architecture: MobileNetV2
-    weights: imagenet
+    architecture: EfficientNetB7
+    weights: noisy-student
     trainable: true
 
   # Global branch: [backbone]->[pooling]->[dense]->[head]
@@ -96,8 +93,7 @@ training_config:
     v: 8
     tpu: lin
 
-  initial_epoch: 0
-  epochs: 50
+  epochs: 40
   samples_per_epoch: 1264376 # 80% from 1580470
 
   # Using SDG, with settings as suggested by Keetar:

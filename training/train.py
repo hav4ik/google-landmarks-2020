@@ -86,8 +86,10 @@ def get_optimizer(algorithm, kwargs):
 
 def prepare_dirs(storage_root, experiment_name):
     if storage_root[:5] == 'gs://':
+        log.debug('Using GCS to store models. Employ the `rsync` strategy')
         storage_root = '/tmp/glc/'
     else:
+        log.debug('Using local storage')
         storage_root = os.path.expanduser(storage_root)
     experiment_dir = os.path.join(storage_root, experiment_name)
     checkpoints_dir = os.path.join(experiment_dir, 'checkpoints')
@@ -98,6 +100,22 @@ def prepare_dirs(storage_root, experiment_name):
     if not os.path.isdir(tensorboard_dir):
         os.makedirs(tensorboard_dir)
     return experiment_dir, checkpoints_dir, tensorboard_dir
+
+
+def calculate_class_weights(label_mapping_df, training_config):
+    class_weights = None
+    if 'class_weights' in training_config and label_mapping_df is not None:
+        if training_config['class_weights'] == 'inv_log':
+            log.debug('Class weights is set to 1/log(class count)')
+            class_weights = np.array(label_mapping_df['num_samples'])
+            class_weights = class_weights.astype(np.float64)
+            class_weights = 1. / np.log(class_weights)
+            mean_weight = np.mean(class_weights)
+            weight_scale = 1. / mean_weight
+            class_weights = class_weights * weight_scale
+        else:
+            raise ValueError('Only `inv_log` is supported right now.')
+    return class_weights
 
 
 def train_delg(experiment,
@@ -130,15 +148,26 @@ def train_delg(experiment,
     # Directories to store models and logs
     experiment_dir, checkpoints_dir, tensorboard_dir = \
         prepare_dirs(experiment['storage'], experiment['name'])
+    with open(os.path.join(experiment_dir, 'config.yaml'), 'w') as f:
+        yaml.dump({
+            'experiment': experiment,
+            'glc_config': glc_config,
+            'dataset_config': dataset_config,
+            'model_config': model_config,
+            'training_config': training_config,
+        }, f, default_flow_style=False)
 
     # Class ID mapping and counts
     label_mapping_df = None
     if 'gld_id_mapping' in glc_config and \
             glc_config['gld_id_mapping'] is not None:
+        log.debug('Found `gld_id_mapping` file')
         label_mapping_csv_path = train_utils.resolve_file_path(
                 glc_config['gld_id_mapping'])
         if os.path.isfile(label_mapping_csv_path):
             label_mapping_df = pd.read_csv(label_mapping_csv_path)
+        else:
+            raise RuntimeError('Failed to load `label_mapping_df`')
 
     # ------------------------------------------------------------
     #   PREPARE TRAINING AND TESTING DATASETS
@@ -220,9 +249,23 @@ def train_delg(experiment,
     # Load and compile model
     with distribution_strategy.scope(), StopWatch('Model compiled in:'):
         model = DelgModel(**model_config)
+
+        class_weights = calculate_class_weights(
+                label_mapping_df, training_config)
+        if class_weights is not None:
+            class_weights = tf.convert_to_tensor(class_weights)
+
+            def retrieval_loss_func(y_true, y_pred):
+                scce = tf.keras.losses.SparseCategoricalCrossentropy()
+                sample_weights = tf.gather(class_weights, y_true)
+                return scce(y_true, y_pred, sample_weight=sample_weights)
+        else:
+            retrieval_loss_func = \
+                tf.keras.losses.SparseCategoricalCrossentropy()
+
         model.compile(
                 optimizer=get_optimizer(**training_config['optimizer']),
-                loss=['sparse_categorical_crossentropy'],
+                loss=retrieval_loss_func,
                 metrics=['sparse_categorical_accuracy'])
 
     # ------------------------------------------------------------
@@ -259,12 +302,19 @@ def train_delg(experiment,
     #   MODEL TRAINING
     # ------------------------------------------------------------
 
+    if 'initial_epoch' in training_config:
+        initial_epoch = training_config['initial_epoch']
+        log.debug(f'Initial epoch is set to {initial_epoch}')
+    else:
+        initial_epoch = 0
+
     model.fit(train_dataset,
               steps_per_epoch=samples_per_epoch // batch_size,
               epochs=epochs,
               callbacks=training_callbacks,
               validation_data=validation_dataset,
-              verbose=1)
+              initial_epoch=initial_epoch,
+              verbose=2)
 
 
 if __name__ == '__main__':

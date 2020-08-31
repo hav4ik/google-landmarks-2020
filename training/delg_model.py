@@ -35,7 +35,7 @@ _backbone_architecture_module = {
 }
 
 
-def load_backbone_model(architecture, weights, trainable):
+def load_backbone_model(architecture, weights, trainable=True):
     network_module = _backbone_architecture_module[architecture]
     weights_file = None
     if weights not in [None, 'imagenet', 'noisy-student']:
@@ -111,6 +111,7 @@ class DelgModel(tf.keras.Model):
                  backbone_config,
                  global_branch_config,
                  local_branch_config,
+                 places_branch_config,
                  **kwargs):
 
         super().__init__(**kwargs)
