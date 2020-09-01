@@ -4,7 +4,6 @@ import yaml
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-from tqdm.keras import TqdmCallback
 from tensorflow.keras import optimizers as keras_optimizers
 
 from glrec.train import dataflow
@@ -300,11 +299,8 @@ def train_delg(experiment,
             write_graph=False,
             update_freq='epoch')
 
-    # TQDM progress bar
-    tqdm_callback = TqdmCallback()
     training_callbacks = [checkpoints_callback,
-                          tensorboard_callback,
-                          tqdm_callback]
+                          tensorboard_callback]
 
     # Additional callbacks required from the config
     for callback_config_item in training_config['additional_callbacks']:
@@ -335,7 +331,7 @@ def train_delg(experiment,
               callbacks=training_callbacks,
               validation_data=validation_dataset,
               initial_epoch=initial_epoch,
-              verbose=2)
+              verbose=1)
 
 
 if __name__ == '__main__':
