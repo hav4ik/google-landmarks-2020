@@ -12,5 +12,6 @@ setup(name='glrec',
           'colorlog>=4.1.0',
           'efficientnet>=1.1.0',
           'gcloud',
+          'keras-tqdm',
       ],
       packages=find_packages())
