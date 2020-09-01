@@ -4,6 +4,7 @@ import yaml
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+from tqdm.keras import TqdmCallback
 from tensorflow.keras import optimizers as keras_optimizers
 
 from glrec.train import dataflow
@@ -235,7 +236,8 @@ def train_delg(experiment,
 
     # Training loop. Datasets are adjusted to Keras format
     def to_keras_format(image, label):
-        label = tf.squeeze(label)
+        label = tf.reshape(tf.squeeze(label), [batch_size, ])
+        image = tf.reshape(image, [batch_size, *dataset_config['image_size']])
         return (image, label), label
 
     train_dataset = train_dataset.map(
@@ -249,7 +251,7 @@ def train_delg(experiment,
     #   PREPARE THE MODEL
     # ------------------------------------------------------------
 
-    # Load and compile model
+    # Load and compile model with appropriate loss function
     with distribution_strategy.scope(), StopWatch('Model compiled in:'):
         model = DelgModel(**model_config)
 
@@ -257,14 +259,17 @@ def train_delg(experiment,
                 label_mapping_df, training_config)
         if class_weights is not None:
             class_weights = tf.convert_to_tensor(class_weights)
+            loss_object = tf.keras.losses.SparseCategoricalCrossentropy(
+                    reduction=tf.keras.losses.Reduction.NONE)
 
             def retrieval_loss_func(y_true, y_pred):
-                scce = tf.keras.losses.SparseCategoricalCrossentropy()
                 sample_weights = tf.gather(class_weights, y_true)
-                return scce(y_true, y_pred, sample_weight=sample_weights)
+                per_sample_loss = loss_object(y_true, y_pred,
+                                              sample_weight=sample_weights)
+                return tf.nn.compute_average_loss(
+                    per_sample_loss, global_batch_size=batch_size)
         else:
-            retrieval_loss_func = \
-                tf.keras.losses.SparseCategoricalCrossentropy()
+            retrieval_loss_func = 'sparse_categorical_crossentropy'
 
         model.compile(
                 optimizer=get_optimizer(**training_config['optimizer']),
@@ -275,12 +280,13 @@ def train_delg(experiment,
     #   PREPARE TRAINING CALLBACKS
     # ------------------------------------------------------------
 
-    # Tensorboard and ModelCheckpoint callbacks
+    # ModelCheckpoint callback
     checkpoints_callback = tf.keras.callbacks.ModelCheckpoint(
         os.path.join(checkpoints_dir,
                      '{epoch:03d}_val_loss={val_loss:.5f}.hdf5'),
         save_freq='epoch')
 
+    # TensorBoard callback
     if experiment['storage'][:5] == 'gs://':
         # This is necessary for TPU training
         tb_log_dir = os.path.join(
@@ -293,7 +299,12 @@ def train_delg(experiment,
             log_dir=tb_log_dir,
             write_graph=False,
             update_freq='epoch')
-    training_callbacks = [checkpoints_callback, tensorboard_callback]
+
+    # TQDM progress bar
+    tqdm_callback = TqdmCallback()
+    training_callbacks = [checkpoints_callback,
+                          tensorboard_callback,
+                          tqdm_callback]
 
     # Additional callbacks required from the config
     for callback_config_item in training_config['additional_callbacks']:

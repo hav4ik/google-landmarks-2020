@@ -46,6 +46,10 @@ class ArcMarginProduct(Layer):
 
     def call(self, inputs, training=None):
         X, y = inputs
+
+        # Squeezing is necessary for Keras. It expands the dimension to (n, 1)
+        y = tf.squeeze(y)
+
         y = tf.cast(y, dtype=tf.int32)
         cosine = tf.matmul(
             tf.math.l2_normalize(X, axis=1),
@@ -107,6 +111,9 @@ class ArcFace(Layer):
 
     def call(self, inputs, training=None):
         embedding, label = inputs
+
+        # Squeezing is necessary for Keras. It expands the dimension to (n, 1)
+        label = tf.squeeze(label)
 
         # Normalize features and weights and compute dot product
         x = tf.nn.l2_normalize(embedding, axis=1)
@@ -172,6 +179,9 @@ class AdaCos(Layer):
 
     def call(self, inputs, training=None):
         embedding, label = inputs
+
+        # Squeezing is necessary for Keras. It expands the dimension to (n, 1)
+        label = tf.squeeze(label)
 
         # Normalize features and weights and compute dot product
         x = tf.nn.l2_normalize(embedding, axis=1)
@@ -249,6 +259,9 @@ class CosFace(Layer):
 
     def call(self, inputs, training=None):
         embedding, label = inputs
+
+        # Squeezing is necessary for Keras. It expands the dimension to (n, 1)
+        label = tf.squeeze(label)
 
         # Normalize features and weights and compute dot product
         x = tf.nn.l2_normalize(embedding, axis=1)
