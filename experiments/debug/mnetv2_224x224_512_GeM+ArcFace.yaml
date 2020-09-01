@@ -2,7 +2,6 @@
 experiment:
   name: mnetv2_224x224_512_GAP+ArcFace_debug
   storage: gs://glc2020-chankhavu-experiments/test
-  mode: debug
   description: >
     This is a toy experiment using MobileNetV2 as backbone.
     The main purpose of this experiment is just for local
