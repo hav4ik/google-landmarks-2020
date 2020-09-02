@@ -275,6 +275,19 @@ def train_delg(experiment,
                 loss=retrieval_loss_func,
                 metrics=['sparse_categorical_accuracy'])
 
+        model.build([
+            [batch_size, *dataset_config['image_size']],
+            [batch_size, ],
+        ])
+
+        if 'previous_weights' in training_config and \
+                training_config['previous_weights'] is not None:
+            # `by_name` flag is used if we're loading from a different
+            # architecture, with some layers in common.
+            previous_weights = train_utils.resolve_file_path(
+                    training_config['previous_weights'])
+            model.load_weights(previous_weights, by_name=True)
+
     # ------------------------------------------------------------
     #   PREPARE TRAINING CALLBACKS
     # ------------------------------------------------------------
