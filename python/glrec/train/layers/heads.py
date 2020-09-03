@@ -107,34 +107,40 @@ class ArcFace(Layer):
         self._w = self.add_weight(shape=(embedding_shape[-1], self._n_classes),
                                   initializer='glorot_uniform',
                                   trainable=True,
-                                  regularizer=self._regularizer)
+                                  regularizer=self._regularizer,
+                                  name='cosine_weights')
 
     def call(self, inputs, training=None):
         embedding, label = inputs
 
         # Squeezing is necessary for Keras. It expands the dimension to (n, 1)
-        label = tf.reshape(label, [-1])
+        label = tf.reshape(label, [-1], name='label_shape_correction')
 
         # Normalize features and weights and compute dot product
-        x = tf.nn.l2_normalize(embedding, axis=1)
-        w = tf.nn.l2_normalize(self._w, axis=0)
-        logits = tf.matmul(x, w)
+        x = tf.nn.l2_normalize(embedding, axis=1, name='normalize_prelogits')
+        w = tf.nn.l2_normalize(self._w, axis=0, name='normalize_weights')
+        cosine_sim = tf.matmul(x, w, name='cosine_similarity')
 
         training = _resolve_training(self, training)
         if not training:
             # We don't have labels if we're not in training mode
-            return logits
+            return self._s * cosine_sim
         else:
-            # Add margin
-            theta = tf.math.acos(
-                    K.clip(logits, -1.0 + K.epsilon(), 1.0 - K.epsilon()))
-            target_logits = tf.math.cos(theta + self._m)
-            one_hot = tf.one_hot(label, depth=self._n_classes)
-            output = logits * (1. - one_hot) + target_logits * one_hot
-
-            # Feature re-scale
-            output *= self._s
-            return output
+            one_hot_labels = tf.one_hot(label,
+                                        depth=self._n_classes,
+                                        name='one_hot_labels')
+            theta = tf.math.acos(K.clip(
+                    cosine_sim, -1.0 + K.epsilon(), 1.0 - K.epsilon()))
+            selected_labels = tf.where(tf.greater(theta, math.pi - self._m),
+                                       tf.zeros_like(one_hot_labels),
+                                       one_hot_labels,
+                                       name='selected_labels')
+            final_theta = tf.where(tf.cast(selected_labels, dtype=tf.bool),
+                                   theta + self._m,
+                                   theta,
+                                   name='final_theta')
+            output = tf.math.cos(final_theta, name='cosine_sim_with_margin')
+            return self._s * output
 
 
 class AdaCos(Layer):
@@ -261,21 +267,28 @@ class CosFace(Layer):
         embedding, label = inputs
 
         # Squeezing is necessary for Keras. It expands the dimension to (n, 1)
-        label = tf.reshape(label, [-1])
+        label = tf.reshape(label, [-1], name='label_shape_correction')
 
         # Normalize features and weights and compute dot product
-        x = tf.nn.l2_normalize(embedding, axis=1)
-        w = tf.nn.l2_normalize(self._w, axis=0)
-        logits = tf.matmul(x, w)
+        x = tf.nn.l2_normalize(embedding, axis=1, name='normalize_prelogits')
+        w = tf.nn.l2_normalize(self._w, axis=0, name='normalize_weights')
+        cosine_sim = tf.matmul(x, w, name='cosine_similarity')
 
         training = _resolve_training(self, training)
         if not training:
-            # We don't have labels to update _s if we're not in training mode
-            return self._s * logits
+            # We don't have labels if we're not in training mode
+            return self._s * cosine_sim
         else:
-            target_logits = logits - self._m
-            one_hot = tf.one_hot(label, depth=self._n_classes)
-            output = logits * (1. - one_hot) + target_logits * one_hot
+            one_hot_labels = tf.one_hot(label,
+                                        depth=self._n_classes,
+                                        name='one_hot_labels')
+            theta = tf.math.acos(K.clip(
+                    cosine_sim, -1.0 + K.epsilon(), 1.0 - K.epsilon()))
+            final_theta = tf.where(tf.cast(one_hot_labels, dtype=tf.bool),
+                                   tf.math.cos(theta) - self._m,
+                                   tf.math.cos(theta),
+                                   name='final_theta')
+            output = tf.math.cos(final_theta, name='cosine_sim_with_margin')
             return self._s * output
 
 
