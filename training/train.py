@@ -280,13 +280,14 @@ def train_delg(experiment,
             [batch_size, ],
         ])
 
-        if 'previous_weights' in training_config and \
-                training_config['previous_weights'] is not None:
+        if 'from_checkpoint' in training_config:
             # `by_name` flag is used if we're loading from a different
             # architecture, with some layers in common.
             previous_weights = train_utils.resolve_file_path(
-                    training_config['previous_weights'])
-            model.load_weights(previous_weights, by_name=True)
+                    training_config['from_checkpoint']['weights'])
+            model.load_weights(
+                    previous_weights,
+                    by_name=training_config['from_checkpoint']['by_name'])
 
     # ------------------------------------------------------------
     #   PREPARE TRAINING CALLBACKS
