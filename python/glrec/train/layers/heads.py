@@ -4,6 +4,7 @@ import tensorflow.keras.backend as K
 from tensorflow.keras.layers import Layer
 from tensorflow.keras.initializers import Constant
 from tensorflow.python.keras.utils import tf_utils
+from glrec.train.utils import resolve_training_flag
 
 
 class ArcMarginProduct(Layer):
@@ -56,7 +57,7 @@ class ArcMarginProduct(Layer):
             tf.math.l2_normalize(self._W, axis=0)
         )
 
-        training = _resolve_training(self, training)
+        training = resolve_training_flag(self, training)
         if not training:
             # We don't have labels if we're not in training mode
             return cosine
@@ -121,7 +122,7 @@ class ArcFace(Layer):
         w = tf.nn.l2_normalize(self._w, axis=0, name='normalize_weights')
         cosine_sim = tf.matmul(x, w, name='cosine_similarity')
 
-        training = _resolve_training(self, training)
+        training = resolve_training_flag(self, training)
         if not training:
             # We don't have labels if we're not in training mode
             return self._s * cosine_sim
@@ -201,7 +202,7 @@ class AdaCos(Layer):
             output = tf.multiply(self._init_s, logits)
             return output
 
-        training = _resolve_training(self, training)
+        training = resolve_training_flag(self, training)
         if not training:
             # We don't have labels to update _s if we're not in training mode
             return self._s * logits
@@ -274,7 +275,7 @@ class CosFace(Layer):
         w = tf.nn.l2_normalize(self._w, axis=0, name='normalize_weights')
         cosine_sim = tf.matmul(x, w, name='cosine_similarity')
 
-        training = _resolve_training(self, training)
+        training = resolve_training_flag(self, training)
         if not training:
             # We don't have labels if we're not in training mode
             return self._s * cosine_sim
@@ -290,14 +291,3 @@ class CosFace(Layer):
                                    name='final_theta')
             output = tf.math.cos(final_theta, name='cosine_sim_with_margin')
             return self._s * output
-
-
-def _resolve_training(layer, training):
-    if training is None:
-        training = K.learning_phase()
-    if isinstance(training, int):
-        training = bool(training)
-    if not layer.trainable:
-        # When the layer is not trainable, override the value
-        training = False
-    return tf_utils.constant_value(training)

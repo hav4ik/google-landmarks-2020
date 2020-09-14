@@ -6,3 +6,7 @@ from .heads import CosFace
 
 # Feature (embedding) pooling layers
 from .pooling import GeneralizedMeanPooling2D
+
+# DELG layers
+from .delg import Attention
+from .delg import Autoencoder
