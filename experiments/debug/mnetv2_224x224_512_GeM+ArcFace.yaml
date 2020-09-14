@@ -1,7 +1,7 @@
 # Information about the experiment
 experiment:
   name: mnetv2_224x224_512_GAP+ArcFace_debug
-  storage: gs://glc2020-chankhavu-experiments/test
+  storage: gs://khch-glc2020-models/debug/mnetv2-global-n-local
   description: >
     This is a toy experiment using MobileNetV2 as backbone.
     The main purpose of this experiment is just for local
@@ -79,12 +79,22 @@ model_config:
         s: 15.98916767 # = sqrt(2) * log(C-1), where C=81313
         m: 0.0 # Keetar used this margin
 
-  # Local features extractor
-  local_branch_config: null
+  # Shallow feature map to be fed to local branch
+  shallow_layer_name: block_15_add
+
+  # Local features extractor configurations.
+  local_branch_config:
+    attention_config: {} # use default settings
+    autoencoder_config: {} # use default settings
 
   # Places classifier
   places_branch_config: null
 
+  # Supported training modes right now:
+  #   - global_only
+  #   - local_only
+  #   - local_and_global
+  training_mode: local_and_global
 
 
 # Configuration of the training process
@@ -112,6 +122,8 @@ training_config:
 
   # Keetar used weights proportional to 1/log(class cnt + 1)
   class_weights: inv_log
+  attention_weight: 1.0
+  reconstruction_weight: 10.0
 
   # Not supported yet
   learning_rate_scheduler: null

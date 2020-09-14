@@ -2,6 +2,7 @@ import tensorflow as tf
 import tensorflow.keras.applications as keras_applications
 import efficientnet.tfkeras as efficientnet
 from tensorflow.keras import layers as keras_layers
+from tensorflow.keras import backend as K
 
 from glrec.train import utils as train_utils
 from glrec.train.constants import constants as train_constants
@@ -128,17 +129,32 @@ class DelgLocalBranch(tf.keras.layers.Layer):
     def call(self, inputs):
         backbone_features, labels = inputs
 
+        # Attention and AutoEncoder
         probability, score = self.attention(backbone_features)
         embedding, reconstruction = self.autoencoder(backbone_features)
 
-        features = tf.nn.l2_normalize(reconstruction, axis=-1)
-        features = tf.reduce_mean(
-                tf.multiply(features, probability),
-                [1, 2], keepdims=False)
+        # Classification using attention and reconstructed features
+        with tf.name_scope('local_classification'):
+            features = tf.nn.l2_normalize(reconstruction, axis=-1)
+            features = tf.reduce_mean(
+                    tf.multiply(features, probability),
+                    [1, 2], keepdims=False)
+            classification_output = self.attention_classifier(features)
 
-        classification_output = self.attention_classifier(features)
-        reconstruction_output = reconstruction
-        return classification_output, reconstruction_output
+        # I'm too lazy to do this shit properly so I'll calculate the
+        # reconstruction loss right here. Pls don't judge me :(
+        with tf.name_scope('local_reconstruction_score'):
+            cn_axis = 3 if K.image_data_format() == 'channels_last' else 1
+            pointwise_l2_norm = tf.norm(
+                    reconstruction - backbone_features, axis=-1)
+            reconstruction_score = tf.reduce_mean(
+                    pointwise_l2_norm, axis=[1, 2], keepdims=False)
+            reconstruction_score = tf.divide(
+                    reconstruction_score,
+                    tf.cast(tf.shape(backbone_features)[cn_axis], tf.float32))
+
+        # Output the classification results and reconstruction l2 loss
+        return classification_output, reconstruction_score
 
     def delg_inference(self, backbone_features):
         # Attention scores
@@ -161,6 +177,7 @@ class DelgModel(tf.keras.Model):
                  local_branch_config,
                  places_branch_config,
                  shallow_layer_name,
+                 training_mode,
                  **kwargs):
         """Initialization of the DELG  model
 
@@ -172,6 +189,7 @@ class DelgModel(tf.keras.Model):
           shallow_layer_name: name of the shallower layer to get features
         """
         super().__init__(**kwargs)
+        self.training_mode = training_mode
 
         # Prepare backbone inference with intermediate outputs
         self.backbone = load_backbone_model(**backbone_config)
@@ -183,29 +201,47 @@ class DelgModel(tf.keras.Model):
 
         # Construct the global branch
         self.global_branch = DelgGlobalBranch(**global_branch_config)
+        if training_mode not in ['global_only', 'local_and_global']:
+            self.global_branch.trainable = False
 
         # Construct the local branch
         self.local_branch = DelgLocalBranch(**local_branch_config)
+        if training_mode not in ['local_only', 'local_and_global']:
+            self.local_branch.trainable = False
+        if training_mode == 'local_only':
+            self.backbone.trainable = False
 
     def call(self, inputs):
         input_image, sparse_label = inputs
         deep_features, shallow_features = self.backbone_infer(input_image)
 
         # global branch
-        global_output = self.global_branch([deep_features, sparse_label])
+        if self.training_mode in ['global_only', 'local_and_global']:
+            global_output = self.global_branch([deep_features, sparse_label])
 
         # local branch with stop gradients, as described in the paper
-        shallow_features = tf.identity(shallow_features)
-        shallow_features = tf.stop_gradient(shallow_features)
-        local_cls_output, local_rcstr_output = self.local_branch(
-                [shallow_features, sparse_label])
+        if self.training_mode in ['local_only', 'local_and_global']:
+            shallow_features = tf.identity(shallow_features)
+            shallow_features = tf.stop_gradient(shallow_features)
+            local_cls_output, local_recon_score = self.local_branch(
+                    [shallow_features, sparse_label])
 
         # 3 heads for 3 losses
-        return global_output, local_cls_output, local_rcstr_output
+        if self.training_mode == 'global_only':
+            return global_output
+        elif self.training_mode == 'local_only':
+            return local_cls_output, local_recon_score
+        elif self.training_mode == 'local_and_global':
+            return global_output, local_cls_output, local_recon_score
+        else:
+            raise RuntimeError('training_mode should be either global_only, '
+                               'local_only, or local_and_global.')
 
     def delg_inference(self, input_image):
         deep_features, shallow_features = self.backbone_infer(input_image)
+
         global_descriptor = self.global_branch.delg_inference(deep_features)
         local_descriptors, probability, scores = \
             self.local_branch.delg_inference(shallow_features)
+
         return global_descriptor, local_descriptors, probability, scores

@@ -252,8 +252,11 @@ def train_delg(experiment,
 
     # Load and compile model with appropriate loss function
     with distribution_strategy.scope(), StopWatch('Model compiled in:'):
+
+        # Load the model
         model = DelgModel(**model_config)
 
+        # Classification loss function
         class_weights = calculate_class_weights(
                 label_mapping_df, training_config)
         if class_weights is not None:
@@ -261,19 +264,60 @@ def train_delg(experiment,
             loss_object = tf.keras.losses.SparseCategoricalCrossentropy(
                     reduction=tf.keras.losses.Reduction.NONE)
 
-            def retrieval_loss_func(y_true, y_pred):
+            def classification_loss_func(y_true, y_pred):
                 sample_weights = tf.gather(class_weights, y_true)
                 per_sample_loss = loss_object(y_true, y_pred,
                                               sample_weight=sample_weights)
                 return tf.nn.compute_average_loss(
                     per_sample_loss, global_batch_size=batch_size)
         else:
-            retrieval_loss_func = 'sparse_categorical_crossentropy'
+            classification_loss_func = 'sparse_categorical_crossentropy'
+
+        # Reconstruction loss function (the reconstruction score itself is
+        # already calculated in the autoencoder layer itself.
+        def reconstruction_loss_func(y_true, y_pred):
+            return tf.nn.compute_average_loss(
+                    y_pred, global_batch_size=batch_size)
+
+        # Prepare the losses and metrics for each model's outputs (heads).
+        # The order of model's outputs, by training mode, is as follows:
+        # - global_only:
+        #     - global_output
+        # - local_only:
+        #     - local_classification_output
+        #     - local_reconstruction_score
+        # - local_and_global:
+        #     - global_output
+        #     - local_classification_output
+        #     - local_reconstruction_score
+        if model_config['training_mode'] == 'global_only':
+            losses = classification_loss_func
+            metrics = ['sparse_categorical_accuracy']
+            loss_weights = None
+        elif model_config['training_mode'] == 'local_only':
+            losses = [classification_loss_func,
+                      reconstruction_loss_func]
+            metrics = [['sparse_categorical_accuracy'], []]
+            loss_weights = [training_config['attention_weight'],
+                            training_config['reconstruction_weight']]
+        elif model_config['training_mode'] == 'local_and_global':
+            losses = [classification_loss_func,
+                      classification_loss_func,
+                      reconstruction_loss_func]
+            metrics = [['sparse_categorical_accuracy'],
+                       ['sparse_categorical_accuracy'],
+                       []]
+            loss_weights = [1.0,
+                            training_config['attention_weight'],
+                            training_config['reconstruction_weight']]
+
+        else:
+            raise RuntimeError('training_mode should be either global_only, '
+                               'local_only, or local_and_global.')
 
         model.compile(
                 optimizer=get_optimizer(**training_config['optimizer']),
-                loss=retrieval_loss_func,
-                metrics=['sparse_categorical_accuracy'])
+                loss=losses, metrics=metrics, loss_weights=loss_weights)
 
         model.build([
             [batch_size, *dataset_config['image_size']],
