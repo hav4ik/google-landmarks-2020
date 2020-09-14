@@ -7,6 +7,7 @@ from glrec.train import utils as train_utils
 from glrec.train.constants import constants as train_constants
 from glrec.train.layers import heads as retrieval_heads
 from glrec.train.layers import pooling as retrieval_pooling
+from glrec.train.layers import delg as delg_layers
 
 
 # Mapping for backbone architecture modules
@@ -103,6 +104,53 @@ class DelgGlobalBranch(tf.keras.layers.Layer):
         output = self._softmax(output_logits)
         return output
 
+    def delg_inference(self, backbone_features):
+        pooled_features = self._pool_features(backbone_features)
+        dim_reduced_features = self._reduce_dimensionality(pooled_features)
+        return tf.nn.l2_normalize(dim_reduced_features, axis=1)
+
+
+class DelgLocalBranch(tf.keras.layers.Layer):
+    """Local (recognition) branch with reconstruction and attention heads.
+    """
+    def __init__(self,
+                 attention_config,
+                 autoencoder_config,
+                 name='local_branch',
+                 **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.attention = delg_layers.Attention(**attention_config)
+        self.autoencoder = delg_layers.Autoencoder(**autoencoder_config)
+        self.attention_classifier = keras_layers.Dense(
+                train_constants.NUM_CLASSES,
+                activation='softmax', name='attention_fc')
+
+    def call(self, inputs):
+        backbone_features, labels = inputs
+
+        probability, score = self.attention(backbone_features)
+        embedding, reconstruction = self.autoencoder(backbone_features)
+
+        features = tf.nn.l2_normalize(reconstruction, axis=-1)
+        features = tf.reduce_mean(
+                tf.multiply(features, probability),
+                [1, 2], keepdims=False)
+
+        classification_output = self.attention_classifier(features)
+        reconstruction_output = reconstruction
+        return classification_output, reconstruction_output
+
+    def delg_inference(self, backbone_features):
+        # Attention scores
+        probability, score = self.attention(backbone_features)
+
+        # Dimensionality reduced embeddings
+        embedding = self.autoencoder.encoder(backbone_features)
+        embedding = tf.nn.l2_normalize(embedding, axis=-1)
+
+        # Output shapes: [bs, h, w, c], [bs, h, w, 1], [bs, h, w, 1]
+        return embedding, probability, score
+
 
 class DelgModel(tf.keras.Model):
     """DELG architecture, as in https://arxiv.org/abs/2001.05027
@@ -112,14 +160,52 @@ class DelgModel(tf.keras.Model):
                  global_branch_config,
                  local_branch_config,
                  places_branch_config,
+                 shallow_layer_name,
                  **kwargs):
+        """Initialization of the DELG  model
 
+        Args:
+          backbone_config: a dictionalry of kwargs for backbone
+          global_branch_config: a dict of kwargs for DelgGlobalBranch
+          local_branch_config: a dict of kwarsg for DelgLocalBranch or None
+          places_branch_config: not usable right now
+          shallow_layer_name: name of the shallower layer to get features
+        """
         super().__init__(**kwargs)
+
+        # Prepare backbone inference with intermediate outputs
         self.backbone = load_backbone_model(**backbone_config)
+        deep_features = self.backbone.layers[-1].output
+        shallow_features = self.backbone.get_layer(shallow_layer_name).output
+        self.backbone_infer = tf.keras.Model(
+                self.backbone.input,
+                outputs=[deep_features, shallow_features])
+
+        # Construct the global branch
         self.global_branch = DelgGlobalBranch(**global_branch_config)
+
+        # Construct the local branch
+        self.local_branch = DelgLocalBranch(**local_branch_config)
 
     def call(self, inputs):
         input_image, sparse_label = inputs
-        backbone_features = self.backbone(input_image)
-        global_output = self.global_branch([backbone_features, sparse_label])
-        return global_output
+        deep_features, shallow_features = self.backbone_infer(input_image)
+
+        # global branch
+        global_output = self.global_branch([deep_features, sparse_label])
+
+        # local branch with stop gradients, as described in the paper
+        shallow_features = tf.identity(shallow_features)
+        shallow_features = tf.stop_gradient(shallow_features)
+        local_cls_output, local_rcstr_output = self.local_branch(
+                [shallow_features, sparse_label])
+
+        # 3 heads for 3 losses
+        return global_output, local_cls_output, local_rcstr_output
+
+    def delg_inference(self, input_image):
+        deep_features, shallow_features = self.backbone_infer(input_image)
+        global_descriptor = self.global_branch.delg_inference(deep_features)
+        local_descriptors, probability, scores = \
+            self.local_branch.delg_inference(shallow_features)
+        return global_descriptor, local_descriptors, probability, scores

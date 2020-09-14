@@ -60,11 +60,16 @@ class Attention(keras_layers.Layer):
         x = tf.nn.relu(x)
 
         score = self.conv2(x)
-        prob = self.activation_layer(score)
-        return prob, score
+        probability = self.activation_layer(score)
+        return probability, score
 
 
 class Autoencoder(keras_layers.Layer):
+    """Instantiates the autoencoder as in DELG paper.
+
+    There are some nuances on the implementation of the autoencoder. See the
+    discussion: https://github.com/tensorflow/models/issues/9189.
+    """
     def __init__(self,
                  dim_embedding=128,
                  regularization_decay=1e-4,
@@ -82,19 +87,16 @@ class Autoencoder(keras_layers.Layer):
         # Num channels will be the same as output channels
         num_channels = input_shape[bn_axis]
 
-        # First convolution with batch normalization
-        self.conv1 = keras_layers.Conv2D(
+        # Linear encoder convolution
+        self.encoder = keras_layers.Conv2D(
                 filters=self.dim_embedding,
                 kernel_size=1,
                 kernel_regularizer=keras_regularizers.l2(self.reg_decay),
                 padding='same',
                 name='autoenc_conv1')
-        self.bn_conv1 = keras_layers.BatchNormalization(
-                axis=bn_axis,
-                name='bn_conv1')
 
-        # Second convolution
-        self.conv2 = keras_layers.Conv2D(
+        # Linear decoder convolution
+        self.decoder = keras_layers.Conv2D(
                 filters=num_channels,
                 kernel_size=1,
                 kernel_regularizer=keras_regularizers.l2(self.reg_decay),
@@ -105,23 +107,16 @@ class Autoencoder(keras_layers.Layer):
         training = resolve_training_flag(self, training)
 
         # Compression to dim_embedding
-        x = self.conv1(inputs)
-        x = self.bn_conv1(x, training=training)
-
-        # First activation
-        if self.activation == 'relu':
-            x = tf.nn.relu(x)
-        elif self.activation == 'swish':
-            x = tf.nn.swish(x)
+        embedding = self.encoder(inputs)
 
         # Expansion back to the shape of inputs
-        y = self.conv2(x)
+        reconstruction = self.decoder(embedding)
 
-        # Second activation. Note that this should match the activation
+        # Encoder's activation. Note that this should match the activation
         # of the backbone model (so, for EfficientNets, use swish)
         if self.activation == 'relu':
-            y = tf.nn.relu(y)
+            reconstruction = tf.nn.relu(reconstruction)
         elif self.activation == 'swish':
-            y = tf.nn.swish(y)
+            reconstruction = tf.nn.swish(reconstruction)
 
-        return y
+        return embedding, reconstruction
