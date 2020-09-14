@@ -291,3 +291,37 @@ class CosFace(Layer):
                                    name='final_theta')
             output = tf.math.cos(final_theta, name='cosine_sim_with_margin')
             return self._s * output
+
+
+class CosineSimilarity(Layer):
+    """Implementation of the simple CosineSimilarity layer, used by Keetar.
+    """
+    def __init__(self,
+                 num_classes,
+                 s=30.0,
+                 regularizer=None,
+                 **kwargs):
+
+        super().__init__(**kwargs)
+        self._n_classes = num_classes
+        self._s = float(s)
+        self._regularizer = regularizer
+
+    def build(self, input_shape):
+        embedding_shape, label_shape = input_shape
+        self._w = self.add_weight(shape=(embedding_shape[-1], self._n_classes),
+                                  initializer='glorot_uniform',
+                                  trainable=True,
+                                  regularizer=self._regularizer)
+
+    def call(self, inputs, training=None):
+        embedding, label = inputs
+
+        # Squeezing is necessary for Keras. It expands the dimension to (n, 1)
+        label = tf.reshape(label, [-1], name='label_shape_correction')
+
+        # Normalize features and weights and compute dot product
+        x = tf.nn.l2_normalize(embedding, axis=1, name='normalize_prelogits')
+        w = tf.nn.l2_normalize(self._w, axis=0, name='normalize_weights')
+        cosine_sim = tf.matmul(x, w, name='cosine_similarity')
+        return self._s * cosine_sim
