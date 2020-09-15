@@ -389,7 +389,7 @@ def train_delg(experiment,
               callbacks=training_callbacks,
               validation_data=validation_dataset,
               initial_epoch=initial_epoch,
-              verbose=1)
+              verbose=training_config['verbose'])
 
 
 if __name__ == '__main__':
