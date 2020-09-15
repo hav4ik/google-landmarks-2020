@@ -265,6 +265,7 @@ def train_delg(experiment,
                     reduction=tf.keras.losses.Reduction.NONE)
 
             def classification_loss_func(y_true, y_pred):
+                y_true = tf.cast(y_true, tf.int32)
                 sample_weights = tf.gather(class_weights, y_true)
                 per_sample_loss = loss_object(y_true, y_pred,
                                               sample_weight=sample_weights)
