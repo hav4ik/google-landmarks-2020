@@ -102,7 +102,7 @@ training_config:
 
   # Previously trained weights
   from_checkpoint:
-    weights: gs://khch-glc2020-models/global/RN152V2/RN152V2-512x512-512-GeM+ArcFace_002/checkpoints/006_val_loss=0.28188.hdf5
+    weights: gs://khch-glc2020-models/global/RN152V2/RN152V2-512x512-512-GeM+ArcFace_002/checkpoints/007_val_loss=0.20604.hdf5
     by_name: false
 
   # single TPU core batch size for 512x512
@@ -112,7 +112,7 @@ training_config:
 
   epochs: 30
   samples_per_epoch: 1508148 # 1580470 - 72322 items in validation
-  initial_epoch: 6
+  initial_epoch: 7
 
   # Using SDG, with settings as suggested by Keetar:
   # lr 1e-3 (adjusted for GPU), 0.9 momentum, and 1e-5 decay
