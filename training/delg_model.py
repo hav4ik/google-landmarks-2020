@@ -200,13 +200,13 @@ class DelgModel(tf.keras.Model):
                 outputs=[deep_features, shallow_features])
 
         # Construct the global branch
-        self.global_branch = DelgGlobalBranch(**global_branch_config)
         if training_mode not in ['global_only', 'local_and_global']:
+            self.global_branch = DelgGlobalBranch(**global_branch_config)
             self.global_branch.trainable = False
 
         # Construct the local branch
-        self.local_branch = DelgLocalBranch(**local_branch_config)
         if training_mode not in ['local_only', 'local_and_global']:
+            self.local_branch = DelgLocalBranch(**local_branch_config)
             self.local_branch.trainable = False
         if training_mode == 'local_only':
             self.backbone.trainable = False
@@ -240,8 +240,19 @@ class DelgModel(tf.keras.Model):
     def delg_inference(self, input_image):
         deep_features, shallow_features = self.backbone_infer(input_image)
 
-        global_descriptor = self.global_branch.delg_inference(deep_features)
-        local_descriptors, probability, scores = \
-            self.local_branch.delg_inference(shallow_features)
+        if self.training_mode in ['global_only', 'local_and_global']:
+            global_descriptor = \
+                self.global_branch.delg_inference(deep_features)
+        if self.training_mode in ['local_only', 'local_and_global']:
+            local_descriptors, probability, scores = \
+                self.local_branch.delg_inference(shallow_features)
 
-        return global_descriptor, local_descriptors, probability, scores
+        if self.training_mode == 'global_only':
+            return global_descriptor
+        elif self.training_mode == 'local_only':
+            return local_descriptors, probability, scores
+        elif self.training_mode == 'local_and_global':
+            return global_descriptor, local_descriptors, probability, scores
+        else:
+            raise RuntimeError('training_mode should be either global_only, '
+                               'local_only, or local_and_global.')
