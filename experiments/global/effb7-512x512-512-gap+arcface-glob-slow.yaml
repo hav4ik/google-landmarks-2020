@@ -1,0 +1,133 @@
+# Information about the experiment
+experiment:
+  name: EffNetB7-512x512-512-GeM+ArcFace_004-Slow-CTPU
+  storage: gs://khch-glc2020-models/global/EffNetB7
+  description: Global model. Copy the strategy of Keetar.
+
+
+
+# Competition-specific configuration
+glc_config:
+  gld_version: gld_v2_clean
+  gld_id_mapping: gs://gld-v2-clean/gld-v2-clean-id-mapping.csv
+
+
+
+# Configure the dataset feeding pipeline
+dataset_config:
+  image_size: [512, 512, 3]
+  imagenet_crop: false
+
+  train_tfrecords:
+    tfrecord_dir: gs://khch-gldv2-clean-keetar-split/tfrecord/
+    basename: train
+    shards: 512
+
+  validation_tfrecords:
+    tfrecord_dir: gs://khch-gldv2-clean-keetar-split/tfrecord/
+    basename: validation
+    shards: 64
+
+  train_shuffle:
+    buffer_size: 2048
+    seed: 17061998
+
+  train_augmentations:
+    # Using only horizontal flips, as in Keetar's solution
+    - class: TFImageTransform
+      kwargs:
+        horizontal_flip: true
+        vertical_flip: false
+        brightness_adjustments: false
+
+
+
+# Model configurations
+model_config:
+
+  # Backbone CNN configuration
+  backbone_config:
+    architecture: EfficientNetB7
+    weights: noisy-student
+    trainable: true
+
+  # Global branch: [backbone]->[pooling]->[dense]->[head]
+  global_branch_config:
+    # Currently, the following pooling methods are supported:
+    #   - GAP()
+    #   - GeM(p=3, train_p=False)
+    pooling_config:
+      method: GAP
+      kwargs: {}
+
+    # Embedding after pooling (output units of a Dense layer
+    # without activation function because the backbone already
+    # have it, and without bias.
+    embedding_dim: 512
+
+    # Currently, the following heads are supported:
+    #   - ArcFace(s=30, m=0.5)
+    #   - ArcMarginProduct(s=30, m=0.5, easy_margin=False)
+    #   - AdaCos(m=0.5, is_dynamic=True)
+    #   - CosFace(s=30, m=0.35)
+    head_config:
+      layer: ArcFace
+      kwargs:
+        s: 15.98916767 # = sqrt(2) * log(C-1), where C=81313
+        m: 0.05 # Google used this margin
+
+  # Shallow feature map to be fed to local branch
+  shallow_layer_name: block7a_expand_activation
+
+  # Local features extractor configurations.
+  local_branch_config:
+    attention_config: {} # use default settings
+    autoencoder_config: {} # use default settings
+
+  # Places classifier
+  places_branch_config: null
+
+  # Supported training modes right now:
+  #   - global_only
+  #   - local_only
+  #   - local_and_global
+  training_mode: global_only
+
+
+
+# Configuration of the training process
+training_config:
+
+  # single TPU core batch size for 512x512
+  batch_size:
+    v: 16
+    tpu: lin
+
+  epochs: 6
+  samples_per_epoch: 1508148 # 1580470 - 72322 items in validation
+  initial_epoch: 0
+
+  # Using SDG, with settings as suggested by Keetar:
+  # lr 1e-3 (adjusted for GPU), 0.9 momentum, and 1e-5 decay
+  optimizer:
+    algorithm: SGD
+    kwargs:
+      learning_rate: 0.001
+      momentum: 0.9
+      decay: 0.00001 # 1e-5
+
+  # Keetar used weights proportional to 1/log(class cnt + 1)
+  class_weights: inv_log
+
+  # Not supported yet
+  learning_rate_scheduler: null
+
+  # We train until convergence, i.e. till val_loss not increasing
+  additional_callbacks:
+    - callback: EarlyStopping
+      kwargs:
+        monitor: val_loss
+        patience: 1
+
+  # Training output verbosity
+  verbose: 1
