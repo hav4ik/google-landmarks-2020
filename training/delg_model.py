@@ -200,13 +200,13 @@ class DelgModel(tf.keras.Model):
                 outputs=[deep_features, shallow_features])
 
         # Construct the global branch
+        self.global_branch = DelgGlobalBranch(**global_branch_config)
         if training_mode not in ['global_only', 'local_and_global']:
-            self.global_branch = DelgGlobalBranch(**global_branch_config)
             self.global_branch.trainable = False
 
         # Construct the local branch
+        self.local_branch = DelgLocalBranch(**local_branch_config)
         if training_mode not in ['local_only', 'local_and_global']:
-            self.local_branch = DelgLocalBranch(**local_branch_config)
             self.local_branch.trainable = False
         if training_mode == 'local_only':
             self.backbone.trainable = False
