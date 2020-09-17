@@ -160,15 +160,14 @@ class AdaCos(Layer):
     """
     def __init__(self,
                  num_classes,
-                 m=0.5,
                  is_dynamic=True,
                  regularizer=None,
+                 name='adacos',
                  **kwargs):
 
-        super().__init__(**kwargs)
+        super().__init__(name=name, **kwargs)
         self._n_classes = num_classes
         self._init_s = math.sqrt(2) * math.log(num_classes - 1)
-        self._m = float(m)
         self._is_dynamic = is_dynamic
         self._regularizer = regularizer
 
@@ -177,12 +176,14 @@ class AdaCos(Layer):
         self._w = self.add_weight(shape=(embedding_shape[-1], self._n_classes),
                                   initializer='glorot_uniform',
                                   trainable=True,
-                                  regularizer=self._regularizer)
+                                  regularizer=self._regularizer,
+                                  name='adacos_weight')
         if self._is_dynamic:
             self._s = self.add_weight(shape=(),
                                       initializer=Constant(self._init_s),
                                       trainable=False,
-                                      aggregation=tf.VariableAggregation.MEAN)
+                                      aggregation=tf.VariableAggregation.MEAN,
+                                      name='adacos_scale')
 
     def call(self, inputs, training=None):
         embedding, label = inputs
