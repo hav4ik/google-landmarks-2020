@@ -181,12 +181,15 @@ def train_delg(experiment,
     train_dataset, validation_dataset = load_dataset(dataset_config)
 
     # Data echoing to train faster https://arxiv.org/pdf/1907.05550.pdf
+    def data_echoing(factor):
+        return lambda image, label: \
+            tf.data.Dataset.from_tensors((image, label)).repeat(factor)
+
     if 'data_echoing' in dataset_config:
         if dataset_config['data_echoing']['factor'] > 1 and \
                 dataset_config['data_echoing']['when'] == 'before_aug':
             train_dataset = train_dataset.flat_map(
-                    lambda t: tf.data.Dataset.from_tensors(t).repeat(
-                            dataset_config['data_echoing']['factor']))
+                    data_echoing(dataset_config['data_echoing']['factor']))
 
     # Data Augmentation
     train_dataset = get_augmented_dataset(train_dataset, dataset_config)
@@ -196,8 +199,7 @@ def train_delg(experiment,
         if dataset_config['data_echoing']['factor'] > 1 and \
                 dataset_config['data_echoing']['when'] == 'after_aug':
             train_dataset = train_dataset.flat_map(
-                    lambda t: tf.data.Dataset.from_tensors(t).repeat(
-                            dataset_config['data_echoing']['factor']))
+                    data_echoing(dataset_config['data_echoing']['factor']))
 
     # Map labels if necessary (for gld-v2-clean)
     if label_mapping_df is not None:

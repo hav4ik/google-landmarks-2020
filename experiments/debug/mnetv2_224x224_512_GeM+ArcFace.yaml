@@ -43,6 +43,10 @@ dataset_config:
         vertical_flip: false
         brightness_adjustments: false
 
+  data_echoing:
+    factor: 2
+    when: before_aug
+
 
 
 # Model configurations
@@ -134,3 +138,6 @@ training_config:
       kwargs:
         monitor: val_loss
         patience: 5
+
+  # Training verbosity
+  verbose: 1
