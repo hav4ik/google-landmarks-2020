@@ -8,6 +8,7 @@ from tensorflow.keras import optimizers as keras_optimizers
 
 from glrec.train import dataflow
 from glrec.train import augmentation
+from glrec.train import lr_schedulers
 from glrec.train import utils as train_utils
 from glrec.train.constants import constants as train_constants
 from glrec.utils import log, StopWatch
@@ -378,6 +379,15 @@ def train_delg(experiment,
 
     training_callbacks = [checkpoints_callback,
                           tensorboard_callback]
+
+    # Learning Rate Scheduler
+    if 'lr_scheduler' in training_config:
+        lr_scheduler_config = training_config['lr_scheduler']
+        if not hasattr(lr_schedulers, lr_scheduler_config['type']):
+            raise ValueError('The specified lr_scheduler is not supported')
+        lr_scheduler = getattr(lr_schedulers, lr_scheduler_config['type'])(
+                **lr_scheduler_config['kwargs'])
+        training_callbacks.append(lr_scheduler)
 
     # Additional callbacks required from the config
     for callback_config_item in training_config['additional_callbacks']:
