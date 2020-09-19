@@ -5,6 +5,8 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import optimizers as keras_optimizers
+import wandb
+from wandb.keras import WandbCallback
 
 from glrec.train import dataflow
 from glrec.train import augmentation
@@ -129,6 +131,20 @@ def train_delg(experiment,
                debug_mode=False):
     """Grand Training Loop for Google Landmarks Challenge 2020
     """
+    wandb.init(project='google-landmarks-recognition-2020',
+               name=experiment['name'],
+               group=model_config['backbone_config']['architecture'],
+               config={
+                    'experiment': experiment,
+                    'glc_config': glc_config,
+                    'dataset_config': dataset_config,
+                    'model_config': model_config,
+                    'training_config': training_config,
+               },
+               id=experiment['name'],
+               resume=True,
+               allow_val_change=True)
+
     log.info('Started Experiment: ' + experiment['name'])
     log.info('All data will be saved to: ' + experiment['storage'])
     log.info('Experiment description: ' + experiment['description'])
@@ -380,7 +396,8 @@ def train_delg(experiment,
             update_freq='epoch')
 
     training_callbacks = [checkpoints_callback,
-                          tensorboard_callback]
+                          tensorboard_callback,
+                          WandbCallback(save_model=False)]
 
     # Learning Rate Scheduler
     if 'lr_scheduler' in training_config:
