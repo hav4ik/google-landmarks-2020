@@ -369,7 +369,9 @@ def train_delg(experiment,
                     training_config['from_checkpoint']['weights'])
             model.load_weights(
                     previous_weights,
-                    by_name=training_config['from_checkpoint']['by_name'])
+                    by_name=training_config['from_checkpoint']['by_name'],
+                    skip_mismatch=training_config[
+                        'from_checkpoint']['skip_mismatch'])
 
     # ------------------------------------------------------------
     #   PREPARE TRAINING CALLBACKS
