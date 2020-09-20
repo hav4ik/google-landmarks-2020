@@ -360,9 +360,11 @@ def train_delg(experiment,
         # Building model by calling. This is necessary for some weird stuff
         # that I can't fully explain.
         dummy_input_images = tf.convert_to_tensor(
-                np.random.rand(batch_size, *dataset_config['image_size']))
+                np.random.rand(batch_size, *dataset_config['image_size']),
+                dtype=tf.float32)
         dummy_true_labels = tf.convert_to_tensor(
-                np.random.randint(0, 1337, size=(batch_size, 1)))
+                np.random.randint(0, 1337, size=(batch_size, 1)),
+                dtype=tf.int32)
         _ = model([dummy_input_images, dummy_true_labels],
                   first_time_warmup=True)
 
