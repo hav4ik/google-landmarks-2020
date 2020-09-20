@@ -89,9 +89,12 @@ class DelgGlobalBranch(tf.keras.layers.Layer):
                  pooling_config,
                  embedding_dim,
                  head_config,
+                 trainable=True,
                  **kwargs):
 
         super().__init__(**kwargs)
+        self.trainable = trainable
+
         self._pool_features = load_pooling_layer(**pooling_config)
         self._reduce_dimensionality = keras_layers.Dense(embedding_dim)
         self._cosine_head = load_global_head(**head_config)
@@ -117,9 +120,12 @@ class DelgLocalBranch(tf.keras.layers.Layer):
     def __init__(self,
                  attention_config,
                  autoencoder_config,
+                 trainable=False,
                  name='local_branch',
                  **kwargs):
         super().__init__(name=name, **kwargs)
+        self.trainable = trainable
+
         self.attention = delg_layers.Attention(**attention_config)
         self.autoencoder = delg_layers.Autoencoder(**autoencoder_config)
         self.attention_classifier = keras_layers.Dense(
