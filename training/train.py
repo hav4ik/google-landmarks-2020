@@ -357,10 +357,21 @@ def train_delg(experiment,
                 optimizer=get_optimizer(**training_config['optimizer']),
                 loss=losses, metrics=metrics, loss_weights=loss_weights)
 
-        model.build([
-            [batch_size, *dataset_config['image_size']],
-            [batch_size, ],
-        ])
+        # Building model by calling. This is necessary for some weird stuff
+        # that I can't fully explain.
+        dummy_input_images = tf.convert_to_tensor(
+                np.random.rand(batch_size, *dataset_config['image_size']))
+        dummy_true_labels = tf.convert_to_tensor(
+                np.random.randint(0, 1337, size=(batch_size, 1)))
+        _ = model([dummy_input_images, dummy_true_labels],
+                  first_time_warmup=True)
+
+
+        # Just calling model.build won't call building of child layers.
+        # model.build([
+        #     [batch_size, *dataset_config['image_size']],
+        #     [batch_size, ],
+        # ])
 
         if 'from_checkpoint' in training_config:
             # `by_name` flag is used if we're loading from a different

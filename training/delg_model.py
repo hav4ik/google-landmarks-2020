@@ -178,6 +178,7 @@ class DelgModel(tf.keras.Model):
                  places_branch_config,
                  shallow_layer_name,
                  training_mode,
+                 inference_mode,
                  **kwargs):
         """Initialization of the DELG  model
 
@@ -200,38 +201,42 @@ class DelgModel(tf.keras.Model):
                 outputs=[deep_features, shallow_features])
 
         # Construct the global branch
-        if training_mode in ['global_only', 'local_and_global']:
-            self.global_branch = DelgGlobalBranch(**global_branch_config)
+        self.global_branch = DelgGlobalBranch(**global_branch_config)
+        if training_mode not in ['global_only', 'local_and_global']:
+            self.global_branch.trainable = False
 
         # Construct the local branch
-        if training_mode in ['local_only', 'local_and_global']:
-            self.local_branch = DelgLocalBranch(**local_branch_config)
+        self.local_branch = DelgLocalBranch(**local_branch_config)
+        if training_mode not in ['local_only', 'local_and_global']:
+            self.local_branch.trainable = False
 
         # If we're only training the local branch, no need to train backbone
         if training_mode == 'local_only':
             self.backbone.trainable = False
 
-    def call(self, inputs):
+    def call(self, inputs, first_time_warmup=False):
         input_image, sparse_label = inputs
         deep_features, shallow_features = self.backbone_infer(input_image)
 
         # global branch
-        if self.training_mode in ['global_only', 'local_and_global']:
+        if self.training_mode in ['global_only', 'local_and_global'] \
+                or first_time_warmup:
             global_output = self.global_branch([deep_features, sparse_label])
 
         # local branch with stop gradients, as described in the paper
-        if self.training_mode in ['local_only', 'local_and_global']:
+        if self.training_mode in ['local_only', 'local_and_global'] \
+                or first_time_warmup:
             shallow_features = tf.identity(shallow_features)
             shallow_features = tf.stop_gradient(shallow_features)
             local_cls_output, local_recon_score = self.local_branch(
                     [shallow_features, sparse_label])
 
         # 3 heads for 3 losses
-        if self.training_mode == 'global_only':
+        if self.training_mode == 'global_only' and not first_time_warmup:
             return global_output
-        elif self.training_mode == 'local_only':
+        elif self.training_mode == 'local_only' and not first_time_warmup:
             return local_cls_output, local_recon_score
-        elif self.training_mode == 'local_and_global':
+        elif self.training_mode == 'local_and_global' or first_time_warmup:
             return global_output, local_cls_output, local_recon_score
         else:
             raise RuntimeError('training_mode should be either global_only, '
@@ -240,19 +245,19 @@ class DelgModel(tf.keras.Model):
     def delg_inference(self, input_image):
         deep_features, shallow_features = self.backbone_infer(input_image)
 
-        if self.training_mode in ['global_only', 'local_and_global']:
+        if self.inference_mode in ['global_only', 'local_and_global']:
             global_descriptor = \
                 self.global_branch.delg_inference(deep_features)
-        if self.training_mode in ['local_only', 'local_and_global']:
+        if self.inference_mode in ['local_only', 'local_and_global']:
             local_descriptors, probability, scores = \
                 self.local_branch.delg_inference(shallow_features)
 
-        if self.training_mode == 'global_only':
+        if self.inference_mode == 'global_only':
             return global_descriptor
-        elif self.training_mode == 'local_only':
+        elif self.inference_mode == 'local_only':
             return local_descriptors, probability, scores
-        elif self.training_mode == 'local_and_global':
+        elif self.inference_mode == 'local_and_global':
             return global_descriptor, local_descriptors, probability, scores
         else:
-            raise RuntimeError('training_mode should be either global_only, '
+            raise RuntimeError('Inference_mode should be either global_only, '
                                'local_only, or local_and_global.')

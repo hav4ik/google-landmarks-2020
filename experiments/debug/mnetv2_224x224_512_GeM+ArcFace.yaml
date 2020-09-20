@@ -94,11 +94,12 @@ model_config:
   # Places classifier
   places_branch_config: null
 
-  # Supported training modes right now:
+  # Supported training modes and inference modes right now:
   #   - global_only
   #   - local_only
   #   - local_and_global
-  training_mode: local_and_global
+  training_mode: global_only
+  inference_mode: global_only
 
 
 # Configuration of the training process
