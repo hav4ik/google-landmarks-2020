@@ -191,6 +191,7 @@ class DelgModel(tf.keras.Model):
         """
         super().__init__(**kwargs)
         self.training_mode = training_mode
+        self.inference_mode = inference_mode
 
         # Prepare backbone inference with intermediate outputs
         self.backbone = load_backbone_model(**backbone_config)
