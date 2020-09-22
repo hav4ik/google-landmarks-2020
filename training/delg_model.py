@@ -110,8 +110,18 @@ class DelgGlobalBranch(tf.keras.layers.Layer):
 
     def delg_inference(self, backbone_features):
         pooled_features = self._pool_features(backbone_features)
-        dim_reduced_features = self._reduce_dimensionality(pooled_features)
-        return tf.nn.l2_normalize(dim_reduced_features, axis=1)
+        embeddings = self._reduce_dimensionality(pooled_features)
+
+        # Final embeddings on a sphere
+        normalized_embeddings = tf.nn.l2_normalize(embeddings, axis=1)
+
+        # Cosine similarity. One can use softmax on that
+        normalized_weights = tf.nn.l2_normalize(self._cosine_head._w)
+        cosine_similarity = tf.matmul(normalized_embeddings,
+                                      normalized_weights)
+
+        # Return both embeddings and cosine similarity
+        return normalized_embeddings, cosine_similarity
 
 
 class DelgLocalBranch(tf.keras.layers.Layer):
@@ -252,18 +262,19 @@ class DelgModel(tf.keras.Model):
         deep_features, shallow_features = self.backbone_infer(input_image)
 
         if self.inference_mode in ['global_only', 'local_and_global']:
-            global_descriptor = \
+            global_descriptor, cosine_sim = \
                 self.global_branch.delg_inference(deep_features)
         if self.inference_mode in ['local_only', 'local_and_global']:
             local_descriptors, probability, scores = \
                 self.local_branch.delg_inference(shallow_features)
 
         if self.inference_mode == 'global_only':
-            return global_descriptor
+            return global_descriptor, cosine_sim
         elif self.inference_mode == 'local_only':
             return local_descriptors, probability, scores
         elif self.inference_mode == 'local_and_global':
-            return global_descriptor, local_descriptors, probability, scores
+            return global_descriptor, cosine_sim, \
+                local_descriptors, probability, scores
         else:
             raise RuntimeError('Inference_mode should be either global_only, '
                                'local_only, or local_and_global.')
