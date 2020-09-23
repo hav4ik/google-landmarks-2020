@@ -108,20 +108,32 @@ class DelgGlobalBranch(tf.keras.layers.Layer):
         output = self._softmax(output_logits)
         return output
 
+    @tf.function(input_signature=[
+        tf.TensorSpec(shape=[None, None, None, None],
+                      dtype=tf.float32,
+                      name='delg_global_infer_input'),
+    ])
     def delg_inference(self, backbone_features):
+        """Returns normalized embeddings, given backbone features.
+        """
         pooled_features = self._pool_features(backbone_features)
         embeddings = self._reduce_dimensionality(pooled_features)
-
-        # Final embeddings on a sphere
         normalized_embeddings = tf.nn.l2_normalize(embeddings, axis=1)
+        return normalized_embeddings
 
-        # Cosine similarity. One can use softmax on that
-        normalized_weights = tf.nn.l2_normalize(self._cosine_head._w)
-        cosine_similarity = tf.matmul(normalized_embeddings,
-                                      normalized_weights)
-
-        # Return both embeddings and cosine similarity
-        return normalized_embeddings, cosine_similarity
+    @tf.function(input_signature=[
+        tf.TensorSpec(shape=[None, None],
+                      dtype=tf.float32,
+                      name='delg_normalized_embeddings_input'),
+    ])
+    def classify_from_embedding(self, normalized_embeddings):
+        """
+        Given the normalized embeddings (from `delg_inference`), perform
+        classification and return a tensor (batch_size, num_classes).
+        """
+        normalized_w = tf.nn.l2_normalize(self._cosine_head._w, axis=0)
+        cosine_similarity = tf.matmul(normalized_embeddings, normalized_w)
+        return cosine_similarity
 
 
 class DelgLocalBranch(tf.keras.layers.Layer):
@@ -172,7 +184,14 @@ class DelgLocalBranch(tf.keras.layers.Layer):
         # Output the classification results and reconstruction l2 loss
         return classification_output, reconstruction_score
 
+    @tf.function(input_signature=[
+        tf.TensorSpec(shape=[None, None, None, None],
+                      dtype=tf.float32,
+                      name='delg_local_infer_input'),
+    ])
     def delg_inference(self, backbone_features):
+        """Local model (descriptors) inference, given backbone features.
+        """
         # Attention scores
         probability, score = self.attention(backbone_features)
 
@@ -258,23 +277,29 @@ class DelgModel(tf.keras.Model):
             raise RuntimeError('training_mode should be either global_only, '
                                'local_only, or local_and_global.')
 
+    @tf.function(input_signature=[
+        tf.TensorSpec(
+            shape=[None, None, None, 3],
+            dtype=tf.float32,
+            name='delg_infer_input',
+        )
+    ])
     def delg_inference(self, input_image):
         deep_features, shallow_features = self.backbone_infer(input_image)
 
         if self.inference_mode in ['global_only', 'local_and_global']:
-            global_descriptor, cosine_sim = \
+            global_descriptor = \
                 self.global_branch.delg_inference(deep_features)
         if self.inference_mode in ['local_only', 'local_and_global']:
             local_descriptors, probability, scores = \
                 self.local_branch.delg_inference(shallow_features)
 
         if self.inference_mode == 'global_only':
-            return global_descriptor, cosine_sim
+            return global_descriptor
         elif self.inference_mode == 'local_only':
             return local_descriptors, probability, scores
         elif self.inference_mode == 'local_and_global':
-            return global_descriptor, cosine_sim, \
-                local_descriptors, probability, scores
+            return global_descriptor, local_descriptors, probability, scores
         else:
             raise RuntimeError('Inference_mode should be either global_only, '
                                'local_only, or local_and_global.')
