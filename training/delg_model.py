@@ -167,6 +167,8 @@ class DelgLocalBranch(tf.keras.layers.Layer):
             features = tf.reduce_mean(
                     tf.multiply(features, probability),
                     [1, 2], keepdims=False)
+            tf.debugging.assert_rank(
+                    features, 2, message='features should have rank 2')
             classification_output = self.attention_classifier(features)
 
         # I'm too lazy to do this shit properly so I'll calculate the
@@ -174,12 +176,19 @@ class DelgLocalBranch(tf.keras.layers.Layer):
         with tf.name_scope('local_reconstruction_score'):
             cn_axis = 3 if K.image_data_format() == 'channels_last' else 1
             pointwise_l2_norm = tf.norm(
-                    reconstruction - backbone_features, axis=-1)
+                    reconstruction - backbone_features,
+                    keepdims=False, axis=-1)
+            tf.debugging.assert_rank(
+                    pointwise_l2_norm, 3,
+                    message='pointwise_l2_norm should have rank 3')
             reconstruction_score = tf.reduce_mean(
                     pointwise_l2_norm, axis=[1, 2], keepdims=False)
             reconstruction_score = tf.divide(
                     reconstruction_score,
                     tf.cast(tf.shape(backbone_features)[cn_axis], tf.float32))
+            tf.debugging.assert_rank(
+                    reconstruction_score, 1,
+                    message='reconstruction_score should have rank 1')
 
         # Output the classification results and reconstruction l2 loss
         return classification_output, reconstruction_score
