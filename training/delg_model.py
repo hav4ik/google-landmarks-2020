@@ -163,8 +163,10 @@ class DelgLocalBranch(tf.keras.layers.Layer):
 
         # Classification using attention and reconstructed features
         with tf.name_scope('local_classification'):
-            features = tf.nn.l2_normalize(reconstruction, axis=-1)
-            features = tf.reduce_mean(
+            # WTF? There shouldn't be an l2 here!!! This is absurd!
+            # features = tf.nn.l2_normalize(reconstruction, axis=-1)
+            features = reconstruction
+            features = tf.reduce_sum(
                     tf.multiply(features, probability),
                     [1, 2], keepdims=False)
             tf.debugging.assert_rank(
@@ -182,7 +184,8 @@ class DelgLocalBranch(tf.keras.layers.Layer):
                     pointwise_l2_norm, 3,
                     message='pointwise_l2_norm should have rank 3')
             reconstruction_score = tf.reduce_mean(
-                    pointwise_l2_norm, axis=[1, 2], keepdims=False)
+                    tf.math.square(pointwise_l2_norm),
+                    axis=[1, 2], keepdims=False)
             reconstruction_score = tf.divide(
                     reconstruction_score,
                     tf.cast(tf.shape(backbone_features)[cn_axis], tf.float32))
