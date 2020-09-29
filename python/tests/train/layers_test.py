@@ -6,6 +6,7 @@ from glrec.train.layers.heads import ArcFace
 from glrec.train.layers.heads import ArcMarginProduct
 from glrec.train.layers.heads import AdaCos
 from glrec.train.layers.heads import CosFace
+from glrec.train.layers.heads import CosineSimilarity
 
 from glrec.train.layers.pooling import GeneralizedMeanPooling2D
 
@@ -88,6 +89,24 @@ def test_cosface(training):
     outputs = model(
             [embeddings, labels],
             training=training,
+            ).numpy()
+    assert outputs.shape == (batch_size, 10)
+
+
+def test_cosinesimilarity():
+    embeddings = tf.keras.Input(shape=(512,))
+    label = tf.keras.Input(shape=(), dtype=tf.int32)
+    output = CosineSimilarity(num_classes=10)([embeddings, label])
+    model = tf.keras.Model([embeddings, label], output)
+
+    batch_size = 8
+    embeddings = np.random.rand(batch_size, 512)
+    labels = np.random.randint(0, 10, size=(batch_size, ))
+    embeddings = tf.convert_to_tensor(embeddings)
+    labels = tf.convert_to_tensor(labels)
+
+    outputs = model(
+            [embeddings, labels],
             ).numpy()
     assert outputs.shape == (batch_size, 10)
 

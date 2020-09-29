@@ -13,5 +13,6 @@ setup(name='glrec',
           'efficientnet>=1.1.0',
           'gcloud',
           'keras-tqdm',
+          'wandb',
       ],
       packages=find_packages())

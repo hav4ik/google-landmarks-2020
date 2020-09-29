@@ -4,6 +4,7 @@ import tensorflow.keras.backend as K
 from tensorflow.keras.layers import Layer
 from tensorflow.keras.initializers import Constant
 from tensorflow.python.keras.utils import tf_utils
+from glrec.train.utils import resolve_training_flag
 
 
 class ArcMarginProduct(Layer):
@@ -56,7 +57,7 @@ class ArcMarginProduct(Layer):
             tf.math.l2_normalize(self._W, axis=0)
         )
 
-        training = _resolve_training(self, training)
+        training = resolve_training_flag(self, training)
         if not training:
             # We don't have labels if we're not in training mode
             return cosine
@@ -121,7 +122,7 @@ class ArcFace(Layer):
         w = tf.nn.l2_normalize(self._w, axis=0, name='normalize_weights')
         cosine_sim = tf.matmul(x, w, name='cosine_similarity')
 
-        training = _resolve_training(self, training)
+        training = resolve_training_flag(self, training)
         if not training:
             # We don't have labels if we're not in training mode
             return self._s * cosine_sim
@@ -159,15 +160,14 @@ class AdaCos(Layer):
     """
     def __init__(self,
                  num_classes,
-                 m=0.5,
                  is_dynamic=True,
                  regularizer=None,
+                 name='adacos',
                  **kwargs):
 
-        super().__init__(**kwargs)
+        super().__init__(name=name, **kwargs)
         self._n_classes = num_classes
         self._init_s = math.sqrt(2) * math.log(num_classes - 1)
-        self._m = float(m)
         self._is_dynamic = is_dynamic
         self._regularizer = regularizer
 
@@ -176,12 +176,14 @@ class AdaCos(Layer):
         self._w = self.add_weight(shape=(embedding_shape[-1], self._n_classes),
                                   initializer='glorot_uniform',
                                   trainable=True,
-                                  regularizer=self._regularizer)
+                                  regularizer=self._regularizer,
+                                  name='adacos_weight')
         if self._is_dynamic:
             self._s = self.add_weight(shape=(),
                                       initializer=Constant(self._init_s),
                                       trainable=False,
-                                      aggregation=tf.VariableAggregation.MEAN)
+                                      aggregation=tf.VariableAggregation.MEAN,
+                                      name='adacos_scale')
 
     def call(self, inputs, training=None):
         embedding, label = inputs
@@ -201,7 +203,7 @@ class AdaCos(Layer):
             output = tf.multiply(self._init_s, logits)
             return output
 
-        training = _resolve_training(self, training)
+        training = resolve_training_flag(self, training)
         if not training:
             # We don't have labels to update _s if we're not in training mode
             return self._s * logits
@@ -274,7 +276,7 @@ class CosFace(Layer):
         w = tf.nn.l2_normalize(self._w, axis=0, name='normalize_weights')
         cosine_sim = tf.matmul(x, w, name='cosine_similarity')
 
-        training = _resolve_training(self, training)
+        training = resolve_training_flag(self, training)
         if not training:
             # We don't have labels if we're not in training mode
             return self._s * cosine_sim
@@ -292,12 +294,35 @@ class CosFace(Layer):
             return self._s * output
 
 
-def _resolve_training(layer, training):
-    if training is None:
-        training = K.learning_phase()
-    if isinstance(training, int):
-        training = bool(training)
-    if not layer.trainable:
-        # When the layer is not trainable, override the value
-        training = False
-    return tf_utils.constant_value(training)
+class CosineSimilarity(Layer):
+    """Implementation of the simple CosineSimilarity layer, used by Keetar.
+    """
+    def __init__(self,
+                 num_classes,
+                 s=30.0,
+                 regularizer=None,
+                 **kwargs):
+
+        super().__init__(**kwargs)
+        self._n_classes = num_classes
+        self._s = float(s)
+        self._regularizer = regularizer
+
+    def build(self, input_shape):
+        embedding_shape, label_shape = input_shape
+        self._w = self.add_weight(shape=(embedding_shape[-1], self._n_classes),
+                                  initializer='glorot_uniform',
+                                  trainable=True,
+                                  regularizer=self._regularizer)
+
+    def call(self, inputs, training=None):
+        embedding, label = inputs
+
+        # Squeezing is necessary for Keras. It expands the dimension to (n, 1)
+        label = tf.reshape(label, [-1], name='label_shape_correction')
+
+        # Normalize features and weights and compute dot product
+        x = tf.nn.l2_normalize(embedding, axis=1, name='normalize_prelogits')
+        w = tf.nn.l2_normalize(self._w, axis=0, name='normalize_weights')
+        cosine_sim = tf.matmul(x, w, name='cosine_similarity')
+        return self._s * cosine_sim

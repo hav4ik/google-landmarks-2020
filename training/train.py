@@ -5,9 +5,12 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import optimizers as keras_optimizers
+import wandb
+from wandb.keras import WandbCallback
 
 from glrec.train import dataflow
 from glrec.train import augmentation
+from glrec.train import lr_schedulers
 from glrec.train import utils as train_utils
 from glrec.train.constants import constants as train_constants
 from glrec.utils import log, StopWatch
@@ -128,6 +131,20 @@ def train_delg(experiment,
                debug_mode=False):
     """Grand Training Loop for Google Landmarks Challenge 2020
     """
+    wandb.init(project='google-landmarks-recognition-2020',
+               name=experiment['name'],
+               group=model_config['backbone_config']['architecture'],
+               config={
+                    'experiment': experiment,
+                    'glc_config': glc_config,
+                    'dataset_config': dataset_config,
+                    'model_config': model_config,
+                    'training_config': training_config,
+               },
+               id=experiment['name'],
+               resume=True,
+               allow_val_change=True)
+
     log.info('Started Experiment: ' + experiment['name'])
     log.info('All data will be saved to: ' + experiment['storage'])
     log.info('Experiment description: ' + experiment['description'])
@@ -178,7 +195,27 @@ def train_delg(experiment,
 
     # Load training and validation datasets
     train_dataset, validation_dataset = load_dataset(dataset_config)
+
+    # Data echoing to train faster https://arxiv.org/pdf/1907.05550.pdf
+    def data_echoing(factor):
+        return lambda image, label: \
+            tf.data.Dataset.from_tensors((image, label)).repeat(factor)
+
+    if 'data_echoing' in dataset_config:
+        if dataset_config['data_echoing']['factor'] > 1 and \
+                dataset_config['data_echoing']['when'] == 'before_aug':
+            train_dataset = train_dataset.flat_map(
+                    data_echoing(dataset_config['data_echoing']['factor']))
+
+    # Data Augmentation
     train_dataset = get_augmented_dataset(train_dataset, dataset_config)
+
+    # Data echoing to train faster https://arxiv.org/pdf/1907.05550.pdf
+    if 'data_echoing' in dataset_config:
+        if dataset_config['data_echoing']['factor'] > 1 and \
+                dataset_config['data_echoing']['when'] == 'after_aug':
+            train_dataset = train_dataset.flat_map(
+                    data_echoing(dataset_config['data_echoing']['factor']))
 
     # Map labels if necessary (for gld-v2-clean)
     if label_mapping_df is not None:
@@ -252,8 +289,11 @@ def train_delg(experiment,
 
     # Load and compile model with appropriate loss function
     with distribution_strategy.scope(), StopWatch('Model compiled in:'):
+
+        # Load the model
         model = DelgModel(**model_config)
 
+        # Classification loss function
         class_weights = calculate_class_weights(
                 label_mapping_df, training_config)
         if class_weights is not None:
@@ -261,24 +301,79 @@ def train_delg(experiment,
             loss_object = tf.keras.losses.SparseCategoricalCrossentropy(
                     reduction=tf.keras.losses.Reduction.NONE)
 
-            def retrieval_loss_func(y_true, y_pred):
+            def classification_loss_func(y_true, y_pred):
+                y_true = tf.cast(y_true, tf.int32)
                 sample_weights = tf.gather(class_weights, y_true)
                 per_sample_loss = loss_object(y_true, y_pred,
                                               sample_weight=sample_weights)
                 return tf.nn.compute_average_loss(
                     per_sample_loss, global_batch_size=batch_size)
         else:
-            retrieval_loss_func = 'sparse_categorical_crossentropy'
+            classification_loss_func = 'sparse_categorical_crossentropy'
+
+        # Reconstruction loss function (the reconstruction score itself is
+        # already calculated in the autoencoder layer itself.
+        def reconstruction_loss_func(y_true, y_pred):
+            return tf.nn.compute_average_loss(
+                    y_pred, global_batch_size=batch_size)
+
+        # Prepare the losses and metrics for each model's outputs (heads).
+        # The order of model's outputs, by training mode, is as follows:
+        # - global_only:
+        #     - global_output
+        # - local_only:
+        #     - local_classification_output
+        #     - local_reconstruction_score
+        # - local_and_global:
+        #     - global_output
+        #     - local_classification_output
+        #     - local_reconstruction_score
+        if model_config['training_mode'] == 'global_only':
+            losses = classification_loss_func
+            metrics = ['sparse_categorical_accuracy']
+            loss_weights = None
+        elif model_config['training_mode'] == 'local_only':
+            losses = [classification_loss_func,
+                      reconstruction_loss_func]
+            metrics = [['sparse_categorical_accuracy'], []]
+            loss_weights = [training_config['attention_weight'],
+                            training_config['reconstruction_weight']]
+        elif model_config['training_mode'] == 'local_and_global':
+            losses = [classification_loss_func,
+                      classification_loss_func,
+                      reconstruction_loss_func]
+            metrics = [['sparse_categorical_accuracy'],
+                       ['sparse_categorical_accuracy'],
+                       []]
+            loss_weights = [1.0,
+                            training_config['attention_weight'],
+                            training_config['reconstruction_weight']]
+
+        else:
+            raise RuntimeError('training_mode should be either global_only, '
+                               'local_only, or local_and_global.')
 
         model.compile(
                 optimizer=get_optimizer(**training_config['optimizer']),
-                loss=retrieval_loss_func,
-                metrics=['sparse_categorical_accuracy'])
+                loss=losses, metrics=metrics, loss_weights=loss_weights)
 
-        model.build([
-            [batch_size, *dataset_config['image_size']],
-            [batch_size, ],
-        ])
+        # Building model by calling. This is necessary for some weird stuff
+        # that I can't fully explain.
+        dummy_input_images = tf.convert_to_tensor(
+                np.random.rand(batch_size, *dataset_config['image_size']),
+                dtype=tf.float32)
+        dummy_true_labels = tf.convert_to_tensor(
+                np.random.randint(0, 1337, size=(batch_size, 1)),
+                dtype=tf.int32)
+        _ = model([dummy_input_images, dummy_true_labels],
+                  first_time_warmup=True)
+
+
+        # Just calling model.build won't call building of child layers.
+        # model.build([
+        #     [batch_size, *dataset_config['image_size']],
+        #     [batch_size, ],
+        # ])
 
         if 'from_checkpoint' in training_config:
             # `by_name` flag is used if we're loading from a different
@@ -287,7 +382,9 @@ def train_delg(experiment,
                     training_config['from_checkpoint']['weights'])
             model.load_weights(
                     previous_weights,
-                    by_name=training_config['from_checkpoint']['by_name'])
+                    by_name=training_config['from_checkpoint']['by_name'],
+                    skip_mismatch=training_config[
+                        'from_checkpoint']['skip_mismatch'])
 
     # ------------------------------------------------------------
     #   PREPARE TRAINING CALLBACKS
@@ -314,7 +411,17 @@ def train_delg(experiment,
             update_freq='epoch')
 
     training_callbacks = [checkpoints_callback,
-                          tensorboard_callback]
+                          tensorboard_callback,
+                          WandbCallback(save_model=False)]
+
+    # Learning Rate Scheduler
+    if 'lr_scheduler' in training_config:
+        lr_scheduler_config = training_config['lr_scheduler']
+        if not hasattr(lr_schedulers, lr_scheduler_config['type']):
+            raise ValueError('The specified lr_scheduler is not supported')
+        lr_scheduler = getattr(lr_schedulers, lr_scheduler_config['type'])(
+                **lr_scheduler_config['kwargs'])
+        training_callbacks.append(lr_scheduler)
 
     # Additional callbacks required from the config
     for callback_config_item in training_config['additional_callbacks']:
@@ -345,7 +452,7 @@ def train_delg(experiment,
               callbacks=training_callbacks,
               validation_data=validation_dataset,
               initial_epoch=initial_epoch,
-              verbose=1)
+              verbose=training_config['verbose'])
 
 
 if __name__ == '__main__':

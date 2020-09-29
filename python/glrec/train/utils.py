@@ -2,6 +2,9 @@ import os
 import math
 import subprocess
 import tensorflow as tf
+import tensorflow.keras.backend as K
+from tensorflow.python.keras.utils import tf_utils
+
 import gcloud.storage as gcs
 from glrec.utils import log, StopWatch
 
@@ -127,3 +130,14 @@ def cmdline_sync_dir_with_gcs(local_directory, gcs_directory, wait=False):
         '{}'.format(gcs_directory)])
     if wait:
         sync_process.wait()
+
+
+def resolve_training_flag(layer, training):
+    if training is None:
+        training = K.learning_phase()
+    if isinstance(training, int):
+        training = bool(training)
+    if not layer.trainable:
+        # When the layer is not trainable, override the value
+        training = False
+    return tf_utils.constant_value(training)
